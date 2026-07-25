@@ -33,7 +33,7 @@ def _assert_rejected(name: str, mutator: Callable[[dict[str, Any]], None], expec
         except ValidationError as exc:
             if expected_error in str(exc):
                 return
-            raise AssertionError(f"{name} raised an unrelated validation error: {exc}") from exc
+            raise AssertionError(f"{name} は想定外の検証エラーを送出しました: {exc}") from exc
         raise AssertionError(f"{name} mutated courier contract was accepted")
     finally:
         golden_quests._fixture = original
@@ -53,7 +53,7 @@ def _assert_accepted(name: str, mutator: Callable[[dict[str, Any]], None]) -> No
     try:
         golden_quests.validate_golden_quests()
     except ValidationError as exc:
-        raise AssertionError(f"{name} should be accepted but was rejected: {exc}") from exc
+        raise AssertionError(f"{name} は受理されるべき変更ですが拒否されました: {exc}") from exc
     finally:
         golden_quests._fixture = original
 
