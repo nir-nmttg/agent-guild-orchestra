@@ -13,7 +13,7 @@
   - `gpt-5.6-luna`: fast and affordable agentic coding model
   - `gpt-5.3-codex-spark`: ultra-fast coding model
 - component evalではRootのhighをreferenceとし、high/xhighを同じsingle-role条件で比較します。`max`はroutine evalと全subagent、`ultra`は全subagentで使いません。runtime templateはRoot effortをproject-localにpinせず、利用者が`high / xhigh / ultra`を選びます。
-- `ultra`はRootのproactive delegationと統合を含むorchestration modeとして扱います。`multi_agent=false`のcomponent effort比較へ混ぜず、named role、許可辺、depth、authority、handoff、最終task outcomeを記録済み実fan-out traceのend-to-end suiteで検証する対象です。trace validatorは実装済みですが、live trace matrixは未取得です。
+- `ultra`はRootのproactive delegationと統合を含むorchestration modeとして扱います。`multi_agent=false`のcomponent effort比較へ混ぜず、named role、許可辺、depth、authority、handoff、最終task outcomeを30 deterministic synthetic contract trace（10 case × 3 mode、negative/mutation testを含む）で検証する対象です。trace validatorは実装済みですが、live real-model fan-out matrixは未検証です。
 - `courier` はユーザー指定により `gpt-5.3-codex-spark / xhigh` を維持し、model 選定の対象外としました。
 
 公式の [GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model) と [Codex Subagents guidance](https://developers.openai.com/codex/subagents/) に従い、曖昧で多段の planning、tool use、validation、最終 decision を伴う role は高能力側、read-heavy で bounded な supporting work は Terra、高頻度で owner が再検証する狭い work は Luna を候補にしました。
@@ -27,9 +27,9 @@ subagentはtask難度に応じてeffortを動的変更せず、認知負荷とde
 1. `scripts/validation/fixtures/golden_quests/` で authority、revision binding、handoff、safety、terminal worker 契約を決定論的 hard gate として検証する。
 2. `scripts/model_selection_eval.yaml` で role ごとのdeployment pair、legacy regression control、same-effort challenger、通常 / edge / safety fixture、required evidence、品質 / 効率指標を固定する。model tier比較は役割のdeployment effortへ固定し、原則はhigh、`sage`はxhighの同一effortで比べる。SageのLuna `high`対Luna `xhigh`はmodel-tier候補へ混ぜず、deployment推薦権限を持たないsupplemental effort診断として別dimensionで記録する。Root、guildmaster、inquisitorのcomponent reasoning比較はSol high/xhighだけに限定する。各 case は deterministic golden fixture に対応付ける。promptは現AGENTSへcommon/role補助資料を重ねる`full` expanded controlと、実deploymentと同じAGENTS + agent developerだけを読む`compact`を独立したprofileとして固定する。role Markdownは補助資料でありcompact profileへ常時重ねない。
 3. `scripts/model_selection_eval.py` で各case / model / effort / repetitionを同じ`pairing_id`のまま`full` / `compact`の両方で反復比較する。candidateには grader labelやprofile名を見せず、grading artifactとmodel / profile provenanceを別directoryに分ける。runnerのseedはjob順序の再現用であり、model sampling seedとは主張しない。
-4. `scripts/root_orchestration_eval.yaml` と `scripts/root_orchestration_eval.py` で、Rootの`high / xhigh / ultra`それぞれについてmapmaking、solo、Party、focused Trial、safety、Guild、Warden、Sage、worker unavailableの記録済みtraceを検証する。Root直接作業禁止、固定pair、Root→named role、唯一の`inquisitor`→`examiner`辺、target・authority・snapshot refを持つRoot preamble、top-level assignmentごとのwait、case内のrole phaseと必須作業順、親子reportのsnapshot/evidence ref gate、report後の次actionをhard gateにする。単体traceの`source`差替えは記録済みsessionとして受理せず、runner自身もmodelを起動しない。session検証は、外部送信ack、allowlist済みwrapper/profileの実artifact、現contractと全traceのSHA-256を結合したartifact integrity gateである。operator attestationを超えてcollectorが実際にそのwrapperでmodelを起動したことを暗号学的に証明するものではないため、現在のmanifestはempirical support claimを常にfalseにし、allowlistも空のままfail closedにする。
+4. `scripts/root_orchestration_eval.yaml` と `scripts/root_orchestration_eval.py` で、Rootの`high / xhigh / ultra`それぞれについてmapmaking、solo、Party、focused Trial、safety、Guild、Warden、Sage、worker unavailableの30 deterministic synthetic contract traceを検証する。negative/mutation testも含め、Root直接作業禁止、固定pair、Root→named role、唯一の`inquisitor`→`examiner`辺、target・authority・snapshot refを持つRoot preamble、top-level assignmentごとのwait、case内のrole phaseと必須作業順、親子reportのsnapshot/evidence ref gate、report後の次actionをhard gateにする。runner自身はmodelを起動しない。live session artifactの検証は、外部送信ack、allowlist済みwrapper/profileの実artifact、現contractと全traceのSHA-256を結合したartifact integrity gateである。operator attestationを超えてcollectorが実際にそのwrapperでmodelを起動したことを暗号学的に証明するものではないため、現在のmanifestはempirical support claimを常にfalseにし、allowlistも空のままfail closedにする。
 
-live component runner は model / effort 差を分離するため `multi_agent=false` にし、単一 role component の出力とtool挙動を測ります。model / effort比較の正本はmanifestの`compact` profile内だけで行い、`full`は現行compact契約へ補助layerを重ねたsupplemental-layer ablationにだけ使います。削除前prompt stackのfrozen fixtureではないため、旧ルール削除の非劣化を証明するcontrolとは扱いません。prompt profile比較は同じmodel / effortのpaired recordだけで行います。実際のsubagent fan-out、caller identity、handoff、integrationはcomponent runnerが再現したと主張しません。Root high/xhigh/ultraのcoordination-only traceは独立した`root_orchestration_eval.py`で検証し、component scoreと混ぜません。通常の`make validate`は全27 mode/caseのsynthetic contract traceとnegative traceを検査しますが、これはlive fan-out evidenceの代替ではありません。
+live component runner は model / effort 差を分離するため `multi_agent=false` にし、単一 role component の出力とtool挙動を測ります。model / effort比較の正本はmanifestの`compact` profile内だけで行い、`full`は現行compact契約へ補助layerを重ねたsupplemental-layer ablationにだけ使います。削除前prompt stackのfrozen fixtureではないため、旧ルール削除の非劣化を証明するcontrolとは扱いません。prompt profile比較は同じmodel / effortのpaired recordだけで行います。実際のsubagent fan-out、caller identity、handoff、integrationはcomponent runnerが再現したと主張しません。Root high/xhigh/ultraのcoordination-only traceは独立した`root_orchestration_eval.py`で検証し、component scoreと混ぜません。通常の`make validate`は10 case × 3 modeの30 deterministic synthetic contract traceとnegative/mutation traceを検査しますが、これはlive real-model fan-out evidenceの代替ではありません。
 
 通常の `make validate` は外部 model を呼ばず、golden Quest と eval manifest の整合だけを検証します。
 live eval は明示実行に分け、出力、usage、elapsed time、worktree / staged / commit diff、commit log、grader worksheet を既定で `/tmp/agent-guild-model-eval` に保存します。
@@ -44,7 +44,7 @@ wrapper reviewでは、単なるpass-throughでないこと、hostのhome、repo
 ./scripts/docker_python.sh scripts/model_selection_eval.py plan
 ./scripts/docker_python.sh scripts/root_orchestration_eval.py validate
 ./scripts/docker_python.sh scripts/root_orchestration_eval.py plan
-# review済み隔離環境で収集した27件のrecorded session artifact integrityを検証
+# review済み隔離環境で収集したlive session artifact integrityを検証（現在のlive matrixは未検証）
 python3 scripts/root_orchestration_eval.py validate-session \
   --session-dir /path/to/root-orchestration-traces
 python3 scripts/model_selection_eval.py run \
@@ -110,7 +110,7 @@ prompt stackの削減量はlayerごとのSHA-256、UTF-8 bytes、文字数、比
 
 今回の最終確認では外部model送信と隔離実行の明示条件が揃っていないため、新runnerのlive比較は実行していません。manifestのwrapper / profile allowlistも意図的に空のため、現状のcheckoutからlive runは起動できません。review済み実行基盤と外部送信許可が揃った時だけ、双方のcanonical SHA-256を同時に登録します。`synthetic_pilot`は全candidate / case / prompt profile / repetition、全hard gate、blind grading、隔離provenanceが揃っても `pilot_recommendation` までに限定します。
 
-component runnerはpilot専用で、`formal_recommendation_available`を常にfalseにします。Root orchestration trace validatorは実装済みですが、manifest内のboolやsynthetic self-testだけでformal化しません。事前登録、power analysis、必要sample size、multiple-comparison補正、履歴由来case、27件のlive E2E trace、adversarial suite、production shadow validationの実artifactを検証するconfirmatory集計が揃うまではblockerを返します。component pilotのscoreだけでworkflow全体の最適性を主張しません。
+component runnerはpilot専用で、`formal_recommendation_available`を常にfalseにします。Root orchestration trace validatorは実装済みですが、manifest内のboolや30 deterministic synthetic contract trace（negative/mutation testを含む）だけでformal化しません。事前登録、power analysis、必要sample size、multiple-comparison補正、履歴由来case、live real-model fan-out matrix、adversarial suite、production shadow validationの実artifactを検証するconfirmatory集計が揃うまではblockerを返します。live matrixは現在未検証であり、component pilotのscoreだけでworkflow全体の最適性を主張しません。
 
 | role | 比較 | 観測結果 | 選定への反映 |
 | --- | --- | --- | --- |

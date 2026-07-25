@@ -60,7 +60,7 @@ custom agentの機械IDは、責務を推測できる一語のGuild職へ統一�
 | `advisor` | `sage` | owner判断を補う一論点のread-only助言 |
 | `quest_sentinel` | `warden` | 通常制御で解消しない例外の診断 |
 
-旧IDと新IDを同じruntimeで混在させません。通常installは旧agent fileを除去し、既存SQLite stateに旧worker ID、role、kindが残る場合はfail closedにします。必要なstateを保全したうえで`--backup --reset-runtime`または`--clean-install`を使ってください。
+旧IDと新IDを同じruntimeで混在させません。通常installは旧agent fileを除去し、既存SQLite stateに旧worker ID、role、kindが残る場合はfail closedにします。必要なstateを保全したうえで`--backup --reset-runtime`または`--backup --clean-install`を使ってください。
 
 ## Topology
 
@@ -120,7 +120,7 @@ Rootだけがtop-level agentを起動し、`captain`などはterminalです。�
 メジャー更新や旧構成を確実に片付ける場合:
 
 ```bash
-./scripts/clean_install.sh --target /path/to/guild-root
+./scripts/clean_install.sh --target /path/to/guild-root --backup
 ```
 
 既存導入を差分更新する場合:
@@ -130,7 +130,7 @@ Rootだけがtop-level agentを起動し、`captain`などはterminalです。�
 ```
 
 source template内のsymlink、secret-like path、MCPなどの外部tool連携pathは拒否します。既存Ledgerの物理schemaが互換でない場合は自動migrationせず、backup/resetまたはclean installを使います。
-clean installは`.orchestra/skill-candidates/`だけを保持し、queue、dashboard、その他の既存・未知runtime siblingを除去して初期化します。
+clean installはnon-dry-runで`--backup`を必須とし、削除前の管理対象を`.agent-guild-orchestra-backups/<timestamp>/`へ退避します。`.orchestra/skill-candidates/`、`repositories/`、third-party Skill、`AGENTS.md`と`.git/info/exclude`の管理ブロック外は保持し、queue、Ledger、dashboard、その他の既存・未知runtime sibling、本プロジェクト管理の導入物を削除または初期化します。復元不能な実行を意図する場合だけ`--allow-clean-install-without-backup`を明示できます。このescape hatchではbackupを作成しません。
 
 ## Validation
 
@@ -156,6 +156,6 @@ validatorは次を確認します。
 - compact promptの行数と旧制約の不在
 - target/secret/state-change/snapshot/lineageのfail-closed
 - prompt profile、role topology、model/effortを分離した評価契約
-- Root high/xhigh/ultraの記録済みE2E trace hard gate（全27 contract self-test。session artifact integrityと実fan-out真正性は区別し、後者は別途必要）
+- Root high/xhigh/ultraの30 deterministic synthetic contract trace hard gate（10 case × 3 mode。negative/mutation testを含む）。live real-model fan-out matrixは未検証で、synthetic self-testは実fan-out真正性を示さない
 
 live model比較は外部送信許可とreview済みwrapper/profileがある場合だけ実行します。component scoreだけでproduction最適化を断定しません。

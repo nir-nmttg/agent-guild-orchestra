@@ -107,6 +107,23 @@ def _run_install(*args: object) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _assert_release_documentation_contract() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    deployment = (ROOT / "docs/deployment-patterns.md").read_text(encoding="utf-8")
+    agent_deployment = (ROOT / "docs/agent-deployment.md").read_text(encoding="utf-8")
+    model_selection = (ROOT / "docs/model-selection-evaluation.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    for label, text in (("README", readme), ("deployment patterns", deployment), ("agent deployment", agent_deployment)):
+        require("--backup" in text, f"{label} は clean install の backup 要件を文書化してください。")
+        require("--allow-clean-install-without-backup" in text, f"{label} は clean install の明示的な backup なし escape hatch を文書化してください。")
+    for label, text in (("README", readme), ("agent deployment", agent_deployment), ("model selection", model_selection), ("CHANGELOG", changelog)):
+        require("30" in text and "synthetic" in text, f"{label} は30件のdeterministic synthetic contract traceを明記してください。")
+        require("negative" in text and "mutation" in text, f"{label} はnegative/mutation traceを明記してください。")
+        require("live" in text and ("未取得" in text or "未検証" in text), f"{label} はlive real-model fan-out matrixが未検証であることを明記してください。")
+        require("27" not in text, f"{label} に旧27 trace参照を残さないでください。")
+
+
 def _installed_text_paths(target: Path) -> list[Path]:
     text_suffixes = {".json", ".md", ".py", ".sh", ".sql", ".toml", ".txt", ".yaml", ".yml"}
     return sorted(
@@ -366,7 +383,7 @@ def _assert_incompatible_runtime_install_rejected(target: Path, label: str) -> N
     incompatible = _run_install("--target", target, "--mode", "copy")
     incompatible_output = incompatible.stdout + incompatible.stderr
     require(incompatible.returncode != 0, f"install.py は既存 incompatible runtime DB の通常 install を拒否してください: {label}")
-    for token in ("--backup", "--reset-runtime", "--clean-install"):
+    for token in ("--backup", "--reset-runtime", "--clean-install", "--backup --clean-install"):
         require(token in incompatible_output, f"install.py の既存 incompatible runtime DB 拒否 message は `{token}` を示してください: {label}")
     require(existing_database.exists(), f"install.py の拒否時は既存 runtime DB を削除しないでください: {label}")
     require(
@@ -382,6 +399,7 @@ def _assert_incompatible_runtime_install_rejected(target: Path, label: str) -> N
 
 
 def validate_install_upgrade_smoke() -> None:
+    _assert_release_documentation_contract()
     _assert_managed_block_helper_matrix()
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -692,9 +710,15 @@ def validate_install_upgrade_smoke() -> None:
         require("init sqlite" in clean_dry_run_output and "state.sqlite" in clean_dry_run_output, "install.py --clean-install --dry-run は runtime DB 再初期化計画を表示してください。")
         require("既存状態を保持" not in clean_dry_run_output, "install.py --clean-install --dry-run は既存 runtime state を保持すると表示しないでください。")
 
-        clean_installed = _run_install("--target", target, "--mode", "copy", "--clean-install")
+        clean_without_backup = _run_install("--target", target, "--mode", "copy", "--clean-install")
+        clean_without_backup_output = clean_without_backup.stdout + clean_without_backup.stderr
+        require(clean_without_backup.returncode != 0, "install.py --clean-install は backup なしの非 dry-run を拒否してください。")
+        require("--backup" in clean_without_backup_output and "--allow-clean-install-without-backup" in clean_without_backup_output, "install.py --clean-install の拒否 message は backup と clean-install 専用 escape flag を示してください。")
+        require(stale_queue_file.exists() and legacy_owned_skill.exists(), "install.py --clean-install の拒否時は既存導入物を削除しないでください。")
+
+        clean_installed = _run_install("--target", target, "--mode", "copy", "--clean-install", "--backup")
         clean_installed_output = clean_installed.stdout + clean_installed.stderr
-        require(clean_installed.returncode == 0, "install.py --clean-install smoke が失敗しました: " + clean_installed.stderr)
+        require(clean_installed.returncode == 0, "install.py --clean-install --backup smoke が失敗しました: " + clean_installed.stderr)
         require(
             "Skill の所有者情報を UTF-8 として読めないため保持します: .agents/skills/non-utf8-external" in clean_installed_output,
             "install.py --clean-install は非UTF-8 external Skillの保全理由だけを警告してください。",
@@ -717,6 +741,16 @@ def validate_install_upgrade_smoke() -> None:
         require(not unknown_runtime_file.exists() and not unknown_runtime_child.exists(), "install.py --clean-install は skill-candidates 以外の未知runtime siblingを除去してください。")
         require(not stale_queue_file.exists(), "install.py --clean-install は既存queue内容を除去して初期化してください。")
         require((target / ".orchestra/dashboard.md").read_bytes() == (ROOT / "template/.agents/orchestra/dashboard.md").read_bytes(), "install.py --clean-install はdashboardを初期状態へ戻してください。")
+        backups = sorted(path for path in (target / BACKUP_DIRECTORY).iterdir() if path.is_dir())
+        require(backups and any((backup / ".orchestra/queue/stale.txt").exists() for backup in backups), "install.py --clean-install --backup は削除前の runtime evidence を退避してください。")
+
+        opt_out_queue_file = target / ".orchestra/queue/opt-out-stale.txt"
+        opt_out_queue_file.write_text("opt-out runtime state\n", encoding="utf-8")
+        backup_count = len(backups)
+        clean_with_escape = _run_install("--target", target, "--mode", "copy", "--clean-install", "--allow-clean-install-without-backup")
+        require(clean_with_escape.returncode == 0, "install.py --clean-install --allow-clean-install-without-backup smoke が失敗しました: " + clean_with_escape.stderr)
+        require(not opt_out_queue_file.exists(), "install.py --clean-install の明示的 backup なし escape hatch は既存 runtime state を初期化してください。")
+        require(len([path for path in (target / BACKUP_DIRECTORY).iterdir() if path.is_dir()]) == backup_count, "install.py --clean-install の明示的 backup なし escape hatch は新規 backup を作成しないでください。")
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "guild"
@@ -853,7 +887,7 @@ def validate_install_upgrade_smoke() -> None:
         sentinel.write_text("keep\n", encoding="utf-8")
         (target / ".agents").symlink_to(external, target_is_directory=True)
 
-        clean_parent_symlink = _run_install("--target", target, "--mode", "copy", "--clean-install")
+        clean_parent_symlink = _run_install("--target", target, "--mode", "copy", "--clean-install", "--allow-clean-install-without-backup")
         output = clean_parent_symlink.stdout + clean_parent_symlink.stderr
         require(clean_parent_symlink.returncode != 0 and "symlink" in output and ".agents" in output, "install.py --clean-install は symlink parent 経由の削除を拒否してください。")
         require(sentinel.read_text(encoding="utf-8") == "keep\n", "install.py --clean-install は symlink parent の外部 dir を削除しないでください。")

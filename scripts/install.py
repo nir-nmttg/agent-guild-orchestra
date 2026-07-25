@@ -362,6 +362,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--allow-non-default-source', action='store_true', help='既定以外の source template を明示的に許可します。信頼済み検証用途だけで使います。')
     parser.add_argument('--clean-install', action='store_true', help='ギルド規約ルートの導入済みランタイムを片付けてから再導入します。repositories/ 配下の repo は移動も削除もしません。')
     parser.add_argument('--backup', action='store_true', help='導入前に既存導入物を退避します。')
+    parser.add_argument('--allow-clean-install-without-backup', action='store_true', help='非推奨の逃げ道です。clean install をバックアップなしで実行する時だけ指定します。')
     parser.add_argument('--allow-reset-runtime-without-backup', action='store_true', help='非推奨の逃げ道です。動的状態をバックアップなしで初期化する時だけ指定します。')
     parser.add_argument('--reset-runtime', action='store_true', help='Ledger と dashboard の状態も初期値へ戻します。')
     parser.add_argument('--no-git-exclude', action='store_true', help='`.git/info/exclude` を更新しません。')
@@ -670,7 +671,7 @@ def runtime_schema_incompatibility_message(database: Path, detail: str) -> str:
         f'既存 runtime DB を v{RUNTIME_SCHEMA_VERSION} の runtime contract と確認できません: {database} ({detail})\n'
         '4.0より前、v4 metadata だけで物理 schema が一致しない、旧agent ID、または旧 runtime 値を含む `state.sqlite` は保持更新できません。'
         '既存状態を保全して初期化する場合は `--backup --reset-runtime`、'
-        '導入物全体を入れ直す場合は `--clean-install` を使ってください。'
+        '導入物全体を入れ直す場合は `--backup --clean-install` を使ってください。'
     )
 
 
@@ -1658,6 +1659,8 @@ def main() -> int:
     validate_source_tree_trust(source_root, args.allow_non_default_source)
     preflight_source_template(source_root)
     validate_existing_runtime_schema(source_root, target_root, args.reset_runtime, args.clean_install)
+    if args.clean_install and not args.backup and not args.dry_run and not args.allow_clean_install_without_backup:
+        raise SystemExit('`--clean-install` は既存の導入物、Ledger、dashboard、queue を削除または初期化します。通常は `--backup` を併用してください。バックアップなしで進める場合だけ `--allow-clean-install-without-backup` を明示してください。`repositories/` 配下は保持します。')
     if args.reset_runtime and not args.clean_install and not args.backup and not args.dry_run and not args.allow_reset_runtime_without_backup:
         raise SystemExit('`--reset-runtime` は既存の Ledger/dashboard 状態を削除します。通常は `--backup` を併用してください。バックアップなしで進める場合だけ `--allow-reset-runtime-without-backup` を明示してください。')
     ensure_directory(target_root, args.dry_run)

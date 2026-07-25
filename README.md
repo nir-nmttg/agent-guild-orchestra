@@ -127,7 +127,7 @@ make validate
 - `repositories/`ディレクトリ
 - Gitリポジトリの場合は`.git/info/exclude`内の管理ブロック（`--no-git-exclude`で省略可能）
 
-`--backup`は、既存の`AGENTS.md`、`.git/info/exclude`、`.agents/`、`.codex/`、`.orchestra/`をtimestamp付きディレクトリへコピーします。`repositories/`配下は含みません。
+`--backup`は、既存の`AGENTS.md`、`.git/info/exclude`、`.agents/`、`.codex/`、`.orchestra/`をtimestamp付きディレクトリへコピーします。`repositories/`配下は含みません。non-dry-runの`--clean-install`は既定で`--backup`が必須です。復元不要と判断した時だけ、明示的な危険な逃げ道`--allow-clean-install-without-backup`を指定できます。この指定では削除前の証跡を作らず、復元できません。
 
 ## 復元とアンインストール
 
@@ -173,7 +173,7 @@ secret、token、credential、password、key、認証情報、PIIは読まず、
 - `evidence_state`: blocker、失敗したcheck、scope drift、high-risk trigger、検証状況の追跡
 - coordination-only Root: 対象repoを読まない回答・説明だけをfast pathとし、target・authority・snapshot・queue、routing、evidence gate、次action、最終synthesisに専念。role仕様どおりのbrowser-control tool実行と観測事実記録だけが狭い例外
 - role-based delegation / Trial: 対象repoの探索、コード読解、実装、test、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集をnamed roleへ委譲
-- Root orchestration trace gate: `high / xhigh / ultra`の固定pair、許可edge、target・authority・snapshot refの事前確認、assignmentごとのwait、role phaseと親子report evidence gateの順序、no-direct-fallbackを27 mode/caseの決定的traceで検証。実fan-outの真正性を示す外部証跡は別途必要
+- Root orchestration trace gate: `high / xhigh / ultra`の固定pair、許可edge、target・authority・snapshot refの事前確認、assignmentごとのwait、role phaseと親子report evidence gateの順序、no-direct-fallbackを、10 case × 3 mode の30 deterministic synthetic contract trace（negative/mutation testを含む）で検証。live real-model fan-out matrixは未検証で、synthetic traceはその実証を代替しない
 - `Ledger`: 検証根拠と残リスクを記録するSQLite監査履歴
 - helper-issued snapshotとqueue lineageのfail-closedな検証
 
@@ -184,7 +184,7 @@ secret、token、credential、password、key、認証情報、PIIは読まず、
 ## 対応範囲と既知の制約
 
 - 導入modeは現在`copy`のみです。
-- runtime schema v4（`4.0`）を前提とし、canonical schemaのSHA-256とtable / column型 / constraint / index定義をexact照合します。v3以前または物理定義が異なるSQLite stateは暗黙migrationせず拒否するため、必要なstateを保全したうえでreset-runtimeまたはclean installを行ってください。
+- runtime schema v4（`4.0`）を前提とし、canonical schemaのSHA-256とtable / column型 / constraint / index定義をexact照合します。v3以前または物理定義が異なるSQLite stateは暗黙migrationせず拒否するため、必要なstateを保全したうえで`--backup --reset-runtime`または`--backup --clean-install`を行ってください。
 - Docker imageはbuild時に外部registryとPython package indexへ接続します。オフライン環境では事前準備が必要です。
 - Codexやモデルの提供状況、設定形式、利用条件の変更により、role設定の調整が必要になる場合があります。
 - Root orchestrationのlive E2E matrixは未取得です。通常validatorのsynthetic trace self-testは契約実装を検証しますが、実model fan-outの実証を代替しません。

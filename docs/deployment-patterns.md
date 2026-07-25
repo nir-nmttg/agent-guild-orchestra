@@ -56,14 +56,14 @@ Skill candidate は `.orchestra/skill-candidates/<target-repo>/<candidate>/` に
 ## クリーンインストール
 
 ```bash
-./scripts/clean_install.sh --target /path/to/guild-root
+./scripts/clean_install.sh --target /path/to/guild-root --backup
 ```
 
-クリーンインストールは、ギルド規約ルートへ導入済みのランタイム一式をいったん片付けてから再導入します。
+クリーンインストールは、ギルド規約ルートへ導入済みのランタイム一式をいったん片付けてから再導入します。non-dry-runでは`--backup`が必須で、削除前に管理対象を`.agent-guild-orchestra-backups/<timestamp>/`へ退避します。
 メジャー更新時や、テンプレートを完全に入れ替えたい時に使います。
 `.orchestra/skill-candidates/`だけは人間review待ち候補として保持し、queue、dashboard、その他の既存・未知`.orchestra/` siblingは除去して現在のtemplateから初期化します。
-`clean_install.sh` wrapper はバックアップを作らず、既存導入物、`metadata.owner: agent-guild-orchestra` の同梱 Skillを片付けてから置き換えます。旧版との互換性のため、frontmatter直下の`owner`もcleanup時だけ認識します。
-`scripts/docker_python.sh scripts/install.py --target /path/to/guild-root --mode copy --clean-install` を使う場合も、バックアップなしで実行できます。導入先は `/` や `$HOME` ではなく、専用のギルド規約ルートを指定してください。
+`clean_install.sh` wrapper はcallerが指定した`--backup`をそのままinstallerへ渡し、non-dry-runではその指定なしに停止します。`.agents/orchestra/`、本プロジェクトownerの同梱 Skill、`.codex/`、`.orchestra/skill-candidates/`以外のruntime sibling、管理ブロックだけを削除・初期化し、`repositories/`、third-party Skill、`skill-candidates/`、管理ブロック外は保持します。旧版との互換性のため、frontmatter直下の`owner`もcleanup時だけ認識します。
+`scripts/docker_python.sh scripts/install.py --target /path/to/guild-root --mode copy --clean-install --backup`も同じ契約です。復元不能な削除を意図的に許容する場合だけ`--allow-clean-install-without-backup`を明示できます。この危険なescape hatchではbackupを作成しません。導入先は `/` や `$HOME` ではなく、専用のギルド規約ルートを指定してください。
 `repositories/` 配下の実リポジトリ移動や破壊的 cleanup は行いません。
 
 ## 差分同期
@@ -114,7 +114,7 @@ README などの非状態ファイルはテンプレート更新に追従する�
 通常の再導入で既存 SQLite state を保持できるのは、`queue_metadata.schema_version` が `4.0` で、かつcanonical `queue_schema.sql`のSHA-256とtable / column型 / nullability / primary key / constraint / index定義を含むSQLite schema署名がexactに一致する場合だけです。
 `schema_version=4.0` でも旧 `tickets` table、`assignments.task_id`、必要table / column不足、同名columnの型・制約差分、index差分などの物理 mismatch があるDBは保持しません。新規initでもschema sourceをDB open前に検証します。
 `schema_version=4.0` でも旧 Rank 値の `campaign`、または改名前のagent ID（`party_leader`、`integration_owner`、`focus_reviewer`、`advisor`、`quest_sentinel`）を含む DB は、現行runtimeと互換とはみなさず通常更新で保持しません。
-v3以前、物理schema mismatch、旧agent ID、または旧runtime値がある状態は暗黙migrationせず拒否します。必要なstateを保全したうえで、`--backup --reset-runtime`または`--clean-install`で明示的に初期化してください。
+v3以前、物理schema mismatch、旧agent ID、または旧runtime値がある状態は暗黙migrationせず拒否します。必要なstateを保全したうえで、`--backup --reset-runtime`または`--backup --clean-install`で明示的に初期化してください。
 
 ## 運用上の注意
 
