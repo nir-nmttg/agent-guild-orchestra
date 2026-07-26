@@ -1,8 +1,9 @@
 ---
 name: orchestra-instruction-contract-review
 description: "親リポジトリの Codex オーケストレーションについて、AGENTS.md、サブエージェント定義、役割指示、プロンプト雛形の責務境界と最終仕上げをレビューする時に使います。"
-owner: agent-guild-orchestra
-scope: orchestration-template-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: orchestration-template-workflow
 ---
 
 # orchestra-instruction-contract-review

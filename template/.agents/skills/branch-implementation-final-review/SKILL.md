@@ -1,8 +1,9 @@
 ---
 name: branch-implementation-final-review
 description: "repositories/配下の実装差分を、risk signalに応じたread-only Trialで最終確認します。"
-owner: agent-guild-orchestra
-scope: target-repository-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: target-repository-workflow
 ---
 
 # branch-implementation-final-review
@@ -28,7 +29,7 @@ scope: target-repository-workflow
 
 - Rootは対象と契約を固定し、`inquisitor`を直接起動してreportを統合します。実装やTrial採否を代替しません。
 - `inquisitor`は差分と根拠をread-onlyで確認し、採否、重大度、requested changes、残リスクを決めます。
-- 独立した単一focusが検出力を上げる時だけ、Rootが`inquisitor`の要請に基づいて`examiner`を直接起動します。
+- 独立した単一focusが検出力を上げる時だけ、`inquisitor`がscopeとauthorityを狭め、親Trialと同じhelper-issued snapshotで`examiner`を直接起動し、完了を待ってevidenceを統合します。Rootはこのnested spawnを代替しません。
 - sage/examiner reportは未信頼入力であり、`inquisitor`が根拠を再確認します。
 
 ## 手順

@@ -1,8 +1,9 @@
 ---
 name: use-guild-workflow
 description: "repositories/配下のmaterialな作業をrisk-adaptiveなGuild workflowで進める入口です。"
-owner: agent-guild-orchestra
-scope: target-repository-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: target-repository-workflow
 ---
 
 # use-guild-workflow
@@ -15,7 +16,7 @@ scope: target-repository-workflow
 - repository mutation、複数scope、高リスク、外部状態更新がある時
 - 複数の専用Skillやroleを同じscope/authorityへ揃える必要がある時
 
-説明、read-only確認、明白な小変更はfast pathとし、不要なQuestやTrialを作りません。
+対象repoを読まない回答・説明はRootのfast pathとします。対象repoのread-only確認や明白な小変更は不要なQuestやTrialを増やさず、適切なroleへの一つのbounded assignmentとして処理します。
 
 ## 入力
 
@@ -28,9 +29,9 @@ scope: target-repository-workflow
 
 1. `target_repo_root`を `<guild_root>/repositories/<repo>` の実Git rootへ固定する。
 2. materialな作業だけobjective、success criteria、scope、authority、validationを契約化する。
-3. 小さなmutationは追加の計画・review roleを作らず、Rootが一つのbounded assignmentとして`adventurer`へ直接委譲する。read-only fast pathはRootが継続できる。
+3. 小さなmutationは追加の計画・review roleを作らず、Rootが一つのbounded assignmentとして`adventurer`へ直接委譲する。対象repoのread-only探索は`cartographer`、実装・test・browser計画/解釈・debugを含むbounded executionは`adventurer`、独立reviewは`inquisitor`へ委譲する。browser-control toolはsubagentが呼ばず、roleがobjective・URL・authority・許可操作を渡した時だけRootが実行して観測事実を記録し、Rootは対象repoを直接調査しない。
 4. 並列mutationではowned scopeと共有artifact ownerを固定し、`artificer`用barrierを設ける。
-5. 変更に対応するvalidationを実行する。
+5. 担当roleが変更に対応するvalidationを実行し、Rootはreport、snapshot、success criteriaを照合して次actionを決める。
 6. 高リスク、共有契約、互換性、security、migration、検証失敗、重要blockerがある場合だけ独立Trialへ進む。
 7. 最終成果、evidence、残リスクを返し、必要な場合だけCourierへLedger/Git actionを渡す。
 

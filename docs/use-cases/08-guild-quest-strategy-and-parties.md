@@ -43,7 +43,7 @@ snapshot:
 4. Root が strategy と command draft を検証し、各 `captain` へ固有の party ID、owned scope、authority、編集禁止 path、success criteria、snapshot を渡します。下流で Guild Law や authority を広げません。
 5. 各`captain`がowned scope、並列化、integration barrier、Party内`artificer`、validation expectations、Trial focusを設計します。
 6. 各 Party の adventurer が共通 base revision と owned scope を確認して実装し、base snapshot と Party owned-scope result snapshot を返します。別 Party の scope 変更だけでは stale にせず、base 不一致、scope 重複、同じ scope の後発変更、失敗、未完了があれば global integration barrier を閉じません。
-7. 全Party reportが揃った後、編集を停止し、Rootが直接起動したSol/highのglobal `artificer`だけが共有契約とcross-Party glueを統合します。Root、`guildmaster`、`captain`は実装を引き取りません。
+7. 全Party reportが揃った後、編集を停止し、Rootが直接起動したdeployment固定pairのglobal `artificer`だけが共有契約とcross-Party glueを統合します。Root、`guildmaster`、`captain`は実装を引き取りません。
 8. global integration report と検証が揃った時点で、全 Party と cross-Party glue を含む `working_tree_content` の integrated snapshot を固定します。以後 Trial 完了まで source state を変更しません。
 9. Trial lead の `inquisitor` が stable snapshot に対して `multi_focus_trial`、必要なら `safety_gate` を行います。必要な単一focusだけを、scopeとauthorityを狭め、helper-issued snapshotを親Trialと完全一致させてterminal `examiner`へ委譲し、完了を待ちます。`inquisitor`はlineageとarchitecture、security、compatibility、regression、validationのreportsを根拠確認して統合します。
 10. Critical / Major が解消し accept された後、`courier` が strategy、Party / integration handoff、Trial、残リスク、snapshot を Ledger に記録し、Root が final report を返します。

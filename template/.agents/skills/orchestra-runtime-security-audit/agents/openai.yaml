@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestra Runtime Security Audit"
+  short_description: "sandboxやapproval、network、hookなど実行環境の安全契約を監査します"
+  default_prompt: "$orchestra-runtime-security-audit を使い、オーケストレーション実行環境の安全契約を監査してください。"

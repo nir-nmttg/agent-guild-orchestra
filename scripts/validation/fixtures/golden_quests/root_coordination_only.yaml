@@ -1,0 +1,61 @@
+id: root_coordination_only
+fixture_mode: static_contract_example
+summary: "Rootは対象repositoryの作業を行わず、browser-control toolだけを役割仕様どおり実行して観測を記録し、reportから次actionを判断する"
+input:
+  target_repo_request_kinds: [repository_read_only, bounded_mutation]
+  worker_unavailable_case: true
+expected:
+  root_model: gpt-5.6-sol
+  root_reasoning_effort:
+    project_local_pin: false
+    user_selectable_modes: [high, xhigh, ultra]
+  control_plane:
+    control_plane_only: true
+    allowed_observations: [target_repo_identity, git_status, snapshot_helper, queue_state, browser_observation_facts]
+    delegated_work:
+      - repository_exploration
+      - implementation
+      - validation_execution
+      - browser_planning
+      - browser_allowed_operation_specification
+      - browser_evidence_interpretation
+      - debugging
+      - review_evidence_generation
+    forbidden_root_work:
+      repository_exploration: true
+      implementation: true
+      validation_execution: true
+      browser_execution: true
+      debugging: true
+      review_evidence_generation: true
+      trial_acceptance: true
+      ledger_write: true
+    browser_control_tool_exception:
+      root_executes_only: true
+      subagent_tool_calls: false
+      required_handoff: [objective, url, authority, allowed_operations]
+      root_records: browser_observation_facts
+    report_required_before_next_action: true
+    worker_unavailable_outcome: needs_human
+  routing_cases:
+    repository_read_only:
+      worker_id: cartographer
+      root_executes: false
+      report_required: true
+    bounded_mutation:
+      worker_id: adventurer
+      root_executes: false
+      report_required: true
+    browser_readonly:
+      worker_id: cartographer
+      root_executes_browser_control_tool: true
+      report_required: true
+    worker_unavailable:
+      outcome: needs_human
+      root_direct_fallback: false
+  ultra_mode:
+    proactive_delegation: true
+    authority_unchanged: true
+    role_topology_unchanged: true
+    subagent_pair_overrides_allowed: false
+    report_gate_unchanged: true

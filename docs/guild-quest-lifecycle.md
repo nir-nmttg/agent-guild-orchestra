@@ -6,6 +6,7 @@ Request
   -> task contract when material
   -> Root direct assignments
   -> bounded execution
+  -> Root evidence gate and next action
   -> integration barrier when parallel mutation
   -> risk-triggered Trial
   -> Ledger / final outcome
@@ -28,7 +29,8 @@ Rankは儀式を決めるものではなく、scope、owner、integration、Tria
 - `captain`は共有artifactのowner、順序、owned scope、integration barrierを決めます。
 - 各`adventurer`は一つのbounded scopeだけを変更します。
 - 全resultが揃いmutationを止めた後、`artificer`がcross-scope glueと統合検証を担当します。
-- Root、strategy role、review roleは実装を引き取りません。
+- Rootはtarget・authority・snapshot・queueのcontrol-plane確認、routing、待機、evidence gate、次action、最終synthesisに加え、roleが仕様化したbrowser-control toolだけを実行して観測事実を記録します。対象repoの探索、コード読解、実装、検証、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集を引き取りません。
+- strategy roleとreview roleも実装を引き取りません。
 
 ## Evidence state
 

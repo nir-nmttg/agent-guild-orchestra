@@ -1,0 +1,198 @@
+version: "1.0"
+
+suite:
+  kind: recorded_end_to_end_multi_agent_trace
+  trace_sources: [synthetic_contract_self_test, live_recorded]
+  live_model_invocation_in_runner: false
+
+root:
+  model: gpt-5.6-sol
+  modes: [high, xhigh, ultra]
+  project_local_effort_pinned: false
+  control_plane_only: true
+
+topology:
+  max_depth: 2
+  top_level_caller: root
+  allowed_nested_edges:
+    inquisitor: [examiner]
+  terminal_roles: [cartographer, guildmaster, captain, adventurer, artificer, examiner, sage, warden, courier]
+
+fixed_pairs:
+  cartographer: {model: gpt-5.6-sol, effort: high}
+  guildmaster: {model: gpt-5.6-sol, effort: xhigh}
+  captain: {model: gpt-5.6-sol, effort: high}
+  adventurer: {model: gpt-5.6-terra, effort: high}
+  artificer: {model: gpt-5.6-sol, effort: high}
+  inquisitor: {model: gpt-5.6-sol, effort: xhigh}
+  examiner: {model: gpt-5.6-terra, effort: high}
+  sage: {model: gpt-5.6-luna, effort: xhigh}
+  warden: {model: gpt-5.6-sol, effort: high}
+  courier: {model: gpt-5.3-codex-spark, effort: xhigh}
+
+trace_contract:
+  root_required_preamble: [target_repo_binding, authority_check, snapshot_request]
+  root_allowed_actions:
+    - target_repo_binding
+    - authority_check
+    - snapshot_request
+    - assignment_created
+    - worker_unavailable
+    - agent_wait
+    - browser_control_tool_observation
+    - report_evidence_gate
+    - next_action
+    - needs_human
+    - report_synthesis
+  root_forbidden_actions:
+    - repository_exploration
+    - implementation
+    - validation_execution
+    - browser_execution
+    - debugging
+    - review_evidence_generation
+    - trial_acceptance
+    - ledger_write
+  role_actions:
+    cartographer: [repository_exploration, browser_planning, browser_allowed_operation_specification, browser_evidence_interpretation, report_recorded]
+    guildmaster: [repository_exploration, guild_strategy, report_recorded]
+    captain: [repository_exploration, execution_design, report_recorded]
+    adventurer: [repository_exploration, implementation, validation_execution, browser_planning, browser_allowed_operation_specification, browser_evidence_interpretation, debugging, report_recorded]
+    artificer: [repository_exploration, implementation, validation_execution, integration, report_recorded]
+    inquisitor: [repository_exploration, validation_execution, review_evidence_generation, child_report_evidence_gate, trial_decision, assignment_created, report_recorded]
+    examiner: [repository_exploration, review_evidence_generation, report_recorded]
+    sage: [repository_exploration, advice, report_recorded]
+    warden: [repository_exploration, diagnosis, report_recorded]
+    courier: [ledger_write, local_git_write, report_recorded]
+  every_assignment_requires_report: true
+  every_top_level_assignment_requires_agent_wait: true
+  required_role_actions_are_ordered: true
+  trial_decision_after_nested_report_gate: true
+  top_level_report_requires_root_gate: true
+  nested_report_requires_parent_gate: true
+  report_synthesis_required_before_terminal: true
+  root_next_action_after_report_gate: true
+  worker_unavailable_forbids_root_fallback: true
+  ultra_preserves_topology_and_pairs: true
+
+cases:
+  mapmaking:
+    contract_fixtures: [root_coordination_only.yaml, mapmaking_readonly_no_edit.yaml]
+    expected_top_level_roles: [cartographer]
+    top_level_role_phases: [[cartographer]]
+    expected_nested_edges: []
+    required_role_actions:
+      cartographer: [repository_exploration]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  solo:
+    contract_fixtures: [root_coordination_only.yaml, solo_small_fix_no_git.yaml]
+    expected_top_level_roles: [adventurer]
+    top_level_role_phases: [[adventurer]]
+    expected_nested_edges: []
+    required_role_actions:
+      adventurer: [repository_exploration, implementation, validation_execution]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  party:
+    contract_fixtures: [root_coordination_only.yaml, party_integration_barrier_stable_revision.yaml]
+    expected_top_level_roles: [captain, adventurer, artificer]
+    top_level_role_phases: [[captain], [adventurer], [artificer]]
+    expected_nested_edges: []
+    required_role_actions:
+      captain: [execution_design]
+      adventurer: [implementation, validation_execution]
+      artificer: [integration, validation_execution]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  focused_trial:
+    contract_fixtures: [root_coordination_only.yaml, focused_trial_risk_triggered_review.yaml]
+    expected_top_level_roles: [inquisitor]
+    top_level_role_phases: [[inquisitor]]
+    expected_nested_edges: [inquisitor->examiner]
+    required_role_actions:
+      inquisitor: [review_evidence_generation, trial_decision]
+      examiner: [review_evidence_generation]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  safety:
+    contract_fixtures: [root_coordination_only.yaml, safety_gate_needs_human.yaml]
+    expected_top_level_roles: [inquisitor]
+    top_level_role_phases: [[inquisitor]]
+    expected_nested_edges: []
+    required_role_actions:
+      inquisitor: [review_evidence_generation, trial_decision]
+    required_root_actions: []
+    terminal_root_action: needs_human
+    worker_unavailable_role: null
+  guild:
+    contract_fixtures: [root_coordination_only.yaml, guild_quest_routing.yaml]
+    expected_top_level_roles: [guildmaster, captain]
+    top_level_role_phases: [[guildmaster], [captain]]
+    expected_nested_edges: []
+    required_role_actions:
+      guildmaster: [guild_strategy]
+      captain: [execution_design]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  warden_control:
+    contract_fixtures: [root_coordination_only.yaml, warden_evidence_trigger.yaml]
+    expected_top_level_roles: [warden]
+    top_level_role_phases: [[warden]]
+    expected_nested_edges: []
+    required_role_actions:
+      warden: [diagnosis]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  sage_focus:
+    contract_fixtures: [root_coordination_only.yaml, sage_owner_synthesis.yaml]
+    expected_top_level_roles: [sage]
+    top_level_role_phases: [[sage]]
+    expected_nested_edges: []
+    required_role_actions:
+      sage: [advice]
+    required_root_actions: []
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+  worker_unavailable:
+    contract_fixtures: [root_coordination_only.yaml]
+    expected_top_level_roles: []
+    top_level_role_phases: []
+    expected_nested_edges: []
+    required_role_actions: {}
+    required_root_actions: []
+    terminal_root_action: needs_human
+    worker_unavailable_role: cartographer
+  browser_readonly:
+    contract_fixtures: [root_coordination_only.yaml, mapmaking_readonly_no_edit.yaml]
+    expected_top_level_roles: [cartographer]
+    top_level_role_phases: [[cartographer]]
+    expected_nested_edges: []
+    required_role_actions:
+      cartographer: [browser_planning, browser_allowed_operation_specification, browser_evidence_interpretation]
+    required_root_actions: [browser_control_tool_observation]
+    terminal_root_action: next_action
+    worker_unavailable_role: null
+
+live_evidence_status:
+  live_execution_completed: false
+  completed_matrix: []
+  required_matrix: all_modes_x_all_cases
+  external_reviewed_execution_required: true
+  empirical_support_claim_allowed: false
+
+live_evidence_policy:
+  external_data_ack_required: true
+  approved_isolation_wrapper_sha256: []
+  approved_isolation_profile_sha256: []
+  session_manifest_filename: session.json
+  wrapper_artifact_filename: collector-wrapper.bin
+  isolation_profile_filename: isolation-attestation.json
+  digest_algorithm: sha256
+  provenance_guarantee: artifact_integrity_and_operator_attestation_not_execution_authenticity

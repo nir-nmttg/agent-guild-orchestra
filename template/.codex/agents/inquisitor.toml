@@ -1,7 +1,7 @@
 name = "inquisitor"
 description = "変更、検証、独立evidenceをrisk-basedに統合し、最終品質判断を返す read-only Trial lead。"
 model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 
 developer_instructions = """

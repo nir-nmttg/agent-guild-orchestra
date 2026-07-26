@@ -1,8 +1,9 @@
 ---
 name: quest-awareness-loop
 description: "materialなtaskでevidence_stateを使い、blocker、failed check、scope drift、高リスクtriggerから次の行動を決めるworkflowです。"
-owner: agent-guild-orchestra
-scope: target-repository-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: target-repository-workflow
 ---
 
 # quest-awareness-loop

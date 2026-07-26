@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,8 @@ import sys
 from typing import Any
 
 
-QUEUE_SCHEMA_VERSION = "3.0"
+QUEUE_SCHEMA_VERSION = "4.0"
+QUEUE_SCHEMA_SHA256 = "a883418f960b28bc84381ed00fe4a9b55eb870e50a41fa26122ace122acb7c7c"
 DEFAULT_DB_NAME = "state.sqlite"
 ALLOWED_EVENT_TYPES = {
     "quest_created",
@@ -247,6 +249,7 @@ def json_dumps(value: Any) -> str:
 
 def connect_write(runtime_root: Path) -> sqlite3.Connection:
     path = db_path(runtime_root)
+    canonical_schema_signature()
     ensure_existing_schema_compatible(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -273,7 +276,7 @@ def connect_existing_read_only(path: Path) -> sqlite3.Connection:
 
 def schema_mismatch_message(schema_errors: list[str]) -> str:
     return (
-        "SQLite runtime DB の物理 schema が v3 と一致しません。"
+        f"SQLite runtime DB の schema contract が {QUEUE_SCHEMA_VERSION} と一致しません。"
         + "自動 migration は行いません。`--backup --reset-runtime` または `--clean-install` を使ってください: "
         + "; ".join(schema_errors)
     )
@@ -283,23 +286,75 @@ def existing_tables(connection: sqlite3.Connection) -> set[str]:
     return {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
 
+def schema_signature(connection: sqlite3.Connection) -> tuple[tuple[str, str, str, str], ...]:
+    rows = connection.execute(
+        """
+        SELECT type, name, tbl_name, sql
+        FROM sqlite_master
+        WHERE type IN ('table', 'index', 'view', 'trigger')
+        ORDER BY type, name, tbl_name
+        """
+    ).fetchall()
+    return tuple(
+        (str(row[0]), str(row[1]), str(row[2]), " ".join(str(row[3] or "").split()))
+        for row in rows
+        if not str(row[1]).startswith("sqlite_")
+    )
+
+
+def canonical_schema_signature() -> tuple[tuple[str, str, str, str], ...]:
+    path = schema_path()
+    content = path.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != QUEUE_SCHEMA_SHA256:
+        raise SystemExit(
+            f"queue_schema.sql SHA-256 がv{QUEUE_SCHEMA_VERSION} contractと一致しません: {digest}"
+        )
+    try:
+        with sqlite3.connect(":memory:") as expected:
+            expected.executescript(content.decode("utf-8"))
+            return schema_signature(expected)
+    except (UnicodeDecodeError, sqlite3.DatabaseError) as exc:
+        raise SystemExit(f"canonical queue_schema.sqlを検証できません: {exc}") from exc
+
+
+def collect_signature_errors(connection: sqlite3.Connection) -> list[str]:
+    expected = canonical_schema_signature()
+    actual = schema_signature(connection)
+    if actual == expected:
+        return []
+    expected_by_name = {(item[0], item[1]): item for item in expected}
+    actual_by_name = {(item[0], item[1]): item for item in actual}
+    missing = sorted(f"{kind}:{name}" for kind, name in expected_by_name.keys() - actual_by_name.keys())
+    unexpected = sorted(f"{kind}:{name}" for kind, name in actual_by_name.keys() - expected_by_name.keys())
+    changed = sorted(
+        f"{kind}:{name}"
+        for kind, name in expected_by_name.keys() & actual_by_name.keys()
+        if expected_by_name[(kind, name)] != actual_by_name[(kind, name)]
+    )
+    details = []
+    if missing:
+        details.append("不足=" + ",".join(missing))
+    if unexpected:
+        details.append("未知=" + ",".join(unexpected))
+    if changed:
+        details.append("定義差分=" + ",".join(changed))
+    return ["canonical table/index/constraint signature不一致: " + "; ".join(details)]
+
+
 def init_db(connection: sqlite3.Connection) -> None:
-    if existing_tables(connection):
-        schema_errors = collect_schema_errors(connection)
-        if schema_errors:
-            raise SystemExit(schema_mismatch_message(schema_errors))
+    existing = bool(existing_tables(connection))
+    if existing:
+        ensure_schema_compatible(connection)
     connection.executescript(schema_path().read_text(encoding="utf-8"))
     schema_errors = collect_schema_errors(connection)
     if schema_errors:
         raise SystemExit(schema_mismatch_message(schema_errors))
-    connection.execute(
-        """
-        INSERT INTO queue_metadata(key, value)
-        VALUES('schema_version', ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
-        """,
-        (QUEUE_SCHEMA_VERSION,),
-    )
+    if not existing:
+        connection.execute(
+            "INSERT INTO queue_metadata(key, value) VALUES('schema_version', ?)",
+            (QUEUE_SCHEMA_VERSION,),
+        )
     connection.commit()
 
 
@@ -329,11 +384,32 @@ def collect_schema_errors(connection: sqlite3.Connection) -> list[str]:
         unexpected_columns = sorted(columns - required_columns - LEGACY_COLUMNS.get(table, set()))
         if unexpected_columns:
             errors.append(f"{table} の未知 column: " + ", ".join(unexpected_columns))
+    errors.extend(collect_signature_errors(connection))
     return errors
+
+
+def collect_schema_version_errors(connection: sqlite3.Connection) -> list[str]:
+    tables = existing_tables(connection)
+    if "queue_metadata" not in tables:
+        return ["queue_metadata.schema_version がありません"]
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(queue_metadata)")}
+    if not {"key", "value"} <= columns:
+        return []
+    row = connection.execute(
+        "SELECT value FROM queue_metadata WHERE key = 'schema_version'"
+    ).fetchone()
+    if row is None or row[0] is None:
+        return ["queue_metadata.schema_version がありません"]
+    actual = str(row[0])
+    if actual != QUEUE_SCHEMA_VERSION:
+        return [f"queue_metadata.schema_version は {QUEUE_SCHEMA_VERSION} が必要です: {actual}"]
+    return []
 
 
 def ensure_schema_compatible(connection: sqlite3.Connection) -> None:
     schema_errors = collect_schema_errors(connection)
+    if not schema_errors:
+        schema_errors.extend(collect_schema_version_errors(connection))
     if schema_errors:
         raise SystemExit(schema_mismatch_message(schema_errors))
 

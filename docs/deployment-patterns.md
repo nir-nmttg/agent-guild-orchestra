@@ -20,6 +20,7 @@
 
 Codex はギルド規約ルートを開いて起動します。
 default `workspace-write` でも `.git/`、`.agents/`、`.codex/` は protected path なので、動的状態は `.orchestra/` に分離して使います。
+Skill candidate は `.orchestra/skill-candidates/<target-repo>/<candidate>/` にだけ隔離し、active `.agents/skills/` へ自動昇格しません。
 初回導入やクリーンインストールは `.agents/orchestra/`、`.codex/`、必要に応じて `.git/info/exclude` を書き換えます。
 通常のターミナルで実行するか、Codex 上では protected path 書き込みを承認してください。
 
@@ -55,13 +56,14 @@ default `workspace-write` でも `.git/`、`.agents/`、`.codex/` は protected 
 ## クリーンインストール
 
 ```bash
-./scripts/clean_install.sh --target /path/to/guild-root
+./scripts/clean_install.sh --target /path/to/guild-root --backup
 ```
 
-クリーンインストールは、ギルド規約ルートへ導入済みのランタイム一式をいったん片付けてから再導入します。
+クリーンインストールは、ギルド規約ルートへ導入済みのランタイム一式をいったん片付けてから再導入します。non-dry-runでは`--backup`が必須で、削除前に管理対象を`.agent-guild-orchestra-backups/<timestamp>/`へ退避します。
 メジャー更新時や、テンプレートを完全に入れ替えたい時に使います。
-`clean_install.sh` wrapper はバックアップを作らず、既存導入物、`owner: agent-guild-orchestra` の同梱 Skillを片付けてから置き換えます。
-`scripts/docker_python.sh scripts/install.py --target /path/to/guild-root --mode copy --clean-install` を使う場合も、バックアップなしで実行できます。導入先は `/` や `$HOME` ではなく、専用のギルド規約ルートを指定してください。
+`.orchestra/skill-candidates/`だけは人間review待ち候補として保持し、queue、dashboard、その他の既存・未知`.orchestra/` siblingは除去して現在のtemplateから初期化します。
+`clean_install.sh` wrapper はcallerが指定した`--backup`をそのままinstallerへ渡し、non-dry-runではその指定なしに停止します。`.agents/orchestra/`、本プロジェクトownerの同梱 Skill、`.codex/`、`.orchestra/skill-candidates/`以外のruntime sibling、管理ブロックだけを削除・初期化し、`repositories/`、third-party Skill、`skill-candidates/`、管理ブロック外は保持します。旧版との互換性のため、frontmatter直下の`owner`もcleanup時だけ認識します。
+`scripts/docker_python.sh scripts/install.py --target /path/to/guild-root --mode copy --clean-install --backup`も同じ契約です。復元不能な削除を意図的に許容する場合だけ`--allow-clean-install-without-backup`を明示できます。この危険なescape hatchではbackupを作成しません。導入先は `/` や `$HOME` ではなく、専用のギルド規約ルートを指定してください。
 `repositories/` 配下の実リポジトリ移動や破壊的 cleanup は行いません。
 
 ## 差分同期
@@ -73,7 +75,7 @@ default `workspace-write` でも `.git/`、`.agents/`、`.codex/` は protected 
 `sync.sh` は Docker 内で `install.py --backup` を実行する薄い wrapper です。
 既存導入を残しながら更新したい時の補助です。通常はクリーンインストールを基準に考え、差分同期が必要な運用だけで使います。
 
-通常の差分同期と`--clean-install`はいずれも、導入先`.codex/config.toml`へRootの`model_reasoning_effort`を出力しません。旧project-local指定が存在する場合もテンプレート同期で除去し、reasoning effortは起動時/UI/global configなどの利用者選択へ委ねます。
+通常の差分同期と`--clean-install`はいずれも、導入先`.codex/config.toml`へRootの`model_reasoning_effort`を出力しません。旧project-local指定が存在する場合もテンプレート同期で除去し、reasoning effortは起動時/UI/global configなどでの`high / xhigh / ultra`の利用者選択へ委ねます。
 
 既定以外の source template を直接指定する場合は、信頼済み検証用途に限り `--allow-non-default-source` を併用します。
 source tree に symlink、秘密情報らしい path、MCP などの外部 tool 連携 path が含まれる場合、installer は拒否します。
@@ -96,8 +98,9 @@ Git 管理したい場合は `--no-git-exclude` を付けてください。
 これは `.git/info/exclude` を新規更新せず、既存の管理ブロックも変更しません。`.agents/orchestra/` と `.codex/` はテンプレート本体として配置されます。
 Codex Skills を共有したい場合の `.agents/skills/` は除外しません。`AGENTS.md` には毎回必要な短い規約だけを置き、再利用ワークフローは Skills 側へ分けてください。
 このテンプレートは設計、レビュー、検証、コミット作成などのリポジトリ単位の Skills を `.agents/skills/` に同梱します。
-同梱 Skill は `owner: agent-guild-orchestra` と用途別の `scope` を持ちます。オーケストレーション本体向けだけ `orchestra-` 接頭辞を使い、`repositories/` 配下対象リポジトリ向けは接頭辞なしにします。
-不要な Skill は削除できますが、残す場合は `SKILL.md` の `name`、`description`、`owner`、`scope` を壊さないでください。
+同梱 Skill の `SKILL.md` frontmatter は、VS Code Agent Skills schemaが対応するfieldだけを使います。このテンプレートではportableな共通部分である`name`、`description`、`metadata`だけを置き、管理用の`owner: agent-guild-orchestra`と用途別の`scope`は文字列値として`metadata`配下に置きます。オーケストレーション本体向けだけ `orchestra-` 接頭辞を使い、`repositories/` 配下対象リポジトリ向けは接頭辞なしにします。
+同梱する全Skillには `agents/openai.yaml` を置き、OpenAI向けの `interface.display_name`、`interface.short_description`、`interface.default_prompt` を定義します。invocation policy、tool dependency、icon、brand colorなどの追加fieldは、具体的な用途があるSkillだけに加えます。
+不要な Skill は削除できますが、残す場合は `SKILL.md` の `name`、`description`、`metadata.owner`、`metadata.scope` を壊さないでください。
 
 ## 状態ファイル
 
@@ -107,11 +110,11 @@ README などの非状態ファイルはテンプレート更新に追従する�
 初期値へ戻したい時だけ `--reset-runtime` を付けます。この場合は `.orchestra/queue/` を作り直し、SQLite 状態も初期化します。
 進行中状態が必要な場合は、初期化前に別途保全してください。既定導線としては `sync.sh --reset-runtime` または `scripts/docker_python.sh scripts/install.py --target /path/to/guild-root --mode copy --backup --reset-runtime` を使います。
 
-`queue/templates/` の artifact metadata、event input の `event_input_required_fields`、SQLite runtime event row の `workflow_id` / `structured_data_usage_json` / `event_safety_json` は v3 schema を正本にします。entity payload に `artifact_type` / `schema_version` を要求する契約ではありません。
-通常の再導入で既存 SQLite state を保持できるのは、`queue_metadata.schema_version` が `3.0` で、かつ v3 の必要 table / column が揃っている場合だけです。
-`schema_version=3.0` でも旧 `tickets` table、`assignments.task_id`、必要 table / column 不足などの物理 mismatch がある DB は保持しません。
-`schema_version=3.0` でも旧 Rank 値の `campaign`、または改名前のagent ID（`party_leader`、`integration_owner`、`focus_reviewer`、`advisor`、`quest_sentinel`）を含む DB は、現行runtimeと互換とはみなさず通常更新で保持しません。
-v2 以前、物理 schema mismatch、旧agent ID、または旧 runtime 値がある状態は自動 migration せず、`--backup --reset-runtime` または `--clean-install` で明示的に初期化してください。
+`queue/templates/` の artifact metadata、event input の `event_input_required_fields`、SQLite runtime event row の `workflow_id` / `structured_data_usage_json` / `event_safety_json` は v4 schema を正本にします。entity payload に `artifact_type` / `schema_version` を要求する契約ではありません。
+通常の再導入で既存 SQLite state を保持できるのは、`queue_metadata.schema_version` が `4.0` で、かつcanonical `queue_schema.sql`のSHA-256とtable / column型 / nullability / primary key / constraint / index定義を含むSQLite schema署名がexactに一致する場合だけです。
+`schema_version=4.0` でも旧 `tickets` table、`assignments.task_id`、必要table / column不足、同名columnの型・制約差分、index差分などの物理 mismatch があるDBは保持しません。新規initでもschema sourceをDB open前に検証します。
+`schema_version=4.0` でも旧 Rank 値の `campaign`、または改名前のagent ID（`party_leader`、`integration_owner`、`focus_reviewer`、`advisor`、`quest_sentinel`）を含む DB は、現行runtimeと互換とはみなさず通常更新で保持しません。
+v3以前、物理schema mismatch、旧agent ID、または旧runtime値がある状態は暗黙migrationせず拒否します。必要なstateを保全したうえで、`--backup --reset-runtime`または`--backup --clean-install`で明示的に初期化してください。
 
 ## 運用上の注意
 

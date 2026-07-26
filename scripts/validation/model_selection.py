@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 
-from .core import ROOT, mapping, read, require, tomllib
+from .core import ROOT, mapping, read, require, sequence, tomllib
 
 
 def validate_model_selection_eval() -> None:
@@ -34,28 +34,114 @@ def validate_model_selection_eval() -> None:
 
     require(tomllib is not None, "model selection 設定同期には tomllib/tomli が必要です。")
     roles = mapping(manifest.get("roles"), "model_selection.roles")
+    selection_policy = mapping(manifest.get("selection_policy"), "model_selection.selection_policy")
+    require(
+        set(selection_policy.get("component_model_catalog", []))
+        == {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"},
+        "component model catalogをSol / Terra / Lunaの最終候補集合にしてください。",
+    )
     root_pair = mapping(mapping(roles.get("root"), "model_selection.roles.root").get("selected_pair"), "model_selection.roles.root.selected_pair")
     root_config = tomllib.loads(read("template/.codex/config.toml"))
     require(root_pair.get("model") == root_config.get("model") and root_pair.get("effort") == "high", "manifest Root selected_pair はruntime pinではなくSol/high評価baselineにしてください。")
     require("model_reasoning_effort" not in root_config, "Root runtime configでreasoning effortを固定しないでください。")
+    cases = mapping(manifest.get("cases"), "model_selection.cases")
+    for case_id in ("root_safety_routing", "root_trivial_routing"):
+        case = mapping(cases.get(case_id), f"model_selection.cases.{case_id}")
+        fixtures = set(sequence(case.get("contract_fixtures"), f"model_selection.cases.{case_id}.contract_fixtures"))
+        require("root_coordination_only.yaml" in fixtures, f"{case_id} はRoot coordination-only fixtureへ結合してください。")
+    root_safety_evidence = set(sequence(mapping(cases["root_safety_routing"], "root_safety_routing").get("required_evidence"), "root_safety_routing.required_evidence"))
+    require({"no_direct_repository_work", "fixed_named_role_topology"} <= root_safety_evidence, "Root safety caseは直接repo作業禁止と固定topologyを採点してください。")
+    root_trivial_evidence = set(sequence(mapping(cases["root_trivial_routing"], "root_trivial_routing").get("required_evidence"), "root_trivial_routing.required_evidence"))
+    require(
+        {
+            "bounded_work_delegated_to_adventurer",
+            "root_does_not_implement_or_validate",
+            "worker_report_required_before_next_action",
+            "no_root_fallback_when_worker_unavailable",
+        }
+        <= root_trivial_evidence,
+        "Root trivial caseは委譲、report gate、no direct fallbackを採点してください。",
+    )
+    expected_pairs = {
+        "root": {"model": "gpt-5.6-sol", "effort": "high"},
+        "adventurer": {"model": "gpt-5.6-terra", "effort": "high"},
+        "sage": {"model": "gpt-5.6-luna", "effort": "xhigh"},
+        "cartographer": {"model": "gpt-5.6-sol", "effort": "high"},
+        "guildmaster": {"model": "gpt-5.6-sol", "effort": "xhigh"},
+        "inquisitor": {"model": "gpt-5.6-sol", "effort": "xhigh"},
+        "artificer": {"model": "gpt-5.6-sol", "effort": "high"},
+        "examiner": {"model": "gpt-5.6-terra", "effort": "high"},
+        "captain": {"model": "gpt-5.6-sol", "effort": "high"},
+        "warden": {"model": "gpt-5.6-sol", "effort": "high"},
+        "courier": {"model": "gpt-5.3-codex-spark", "effort": "xhigh"},
+    }
     for role, value in roles.items():
         role_data = mapping(value, f"model_selection.roles.{role}")
-        if role == "root":
-            continue
         pair_key = "fixed_pair" if role_data.get("selection_excluded") is True else "selected_pair"
         selected = mapping(role_data.get(pair_key), f"model_selection.roles.{role}.{pair_key}")
+        require(selected == expected_pairs.get(role), f"manifest {role} {pair_key} を合意済みdeployment pairと一致させてください。")
+        if role == "root":
+            continue
         agent = tomllib.loads(read(f"template/.codex/agents/{role}.toml"))
         require(selected == {"model": agent.get("model"), "effort": agent.get("model_reasoning_effort")}, f"manifest {role} {pair_key} を actual agent config と一致させてください。")
+
+    sage_role = mapping(roles.get("sage"), "model_selection.roles.sage")
+    sage_primary_candidates = [
+        mapping(value, "model_selection.roles.sage.candidate")
+        for value in sequence(sage_role.get("candidates"), "model_selection.roles.sage.candidates")
+    ]
+    require(
+        {(value.get("model"), value.get("effort")) for value in sage_primary_candidates}
+        == {
+            ("gpt-5.6-luna", "xhigh"),
+            ("gpt-5.6-terra", "xhigh"),
+            ("gpt-5.6-sol", "xhigh"),
+        },
+        "Sage model-tier候補はLuna/Terra/Solのsame-effort xhigh比較にしてください。",
+    )
+    sage_supplemental = mapping(
+        sage_role.get("supplemental_effort_comparison"),
+        "model_selection.roles.sage.supplemental_effort_comparison",
+    )
+    require(
+        sage_supplemental
+        == {
+            "recommendation_authority": "diagnostic_only",
+            "reference_pair": {"model": "gpt-5.6-luna", "effort": "xhigh"},
+            "challenger_pairs": [{"model": "gpt-5.6-luna", "effort": "high"}],
+        },
+        "Sage supplemental effort比較はLuna/xhigh reference対Luna/high challengerだけにしてください。",
+    )
+    sage_execution_pairs = module._candidate_list(sage_role, include_regression=False)
+    require(
+        any(
+            value == {"model": "gpt-5.6-luna", "effort": "high", "source": "effort_challenger"}
+            for value in sage_execution_pairs
+        ),
+        "runnerはSage Luna/highを独立したeffort challengerとして実行matrixへ含めてください。",
+    )
 
     text = read("scripts/model_selection_eval.yaml")
     for token in (
         "fixed_pair_per_subagent: true",
         "dynamic_effort_allowed: false",
+        "component_model_catalog: [gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna]",
+        "subagent_allowed_efforts: [high, xhigh]",
         "root_user_configurable_effort: true",
-        "root_allowed_efforts: [high, xhigh, max]",
-        "root_max_requires_explicit_user_selection: true",
-        "max_in_routine_eval: false",
+        "root_runtime_effort_pinned: false",
+        "root_allowed_modes: [high, xhigh, ultra]",
+        "root_component_reference_effort: high",
+        "root_component_eval_efforts: [high, xhigh]",
+        "root_ultra_mode: orchestration",
+        "component_eval_multi_agent: false",
+        "ultra_in_scope: true",
         "phase_one_reasoning_floor: high",
+        "model_tier_comparison_effort: high",
+        "model_tier_comparison_effort_overrides: {sage: xhigh}",
+        "supplemental_effort_comparison:",
+        "recommendation_authority: diagnostic_only",
+        "reasoning_comparison_efforts: [high, xhigh]",
+        "root_component_comparison_roles:",
         "model_tier_comparison_roles:",
         "reasoning_comparison_roles:",
         "fixed_pair_roles:",
@@ -85,6 +171,14 @@ def validate_model_selection_eval() -> None:
         "confirmatory_policy:",
     ):
         require(token in text, f"model selection eval manifest に `{token}` が必要です。")
+    for deprecated_token in (
+        "root_allowed_efforts",
+        "root_default_effort",
+        "root_max_requires_explicit_user_selection",
+        "max_in_routine_eval",
+        "ultra_in_scope: false",
+    ):
+        require(deprecated_token not in text, f"model selection eval manifest から旧契約 `{deprecated_token}` を除去してください。")
 
     runner = read("scripts/model_selection_eval.py")
     for token in (
@@ -104,6 +198,7 @@ def validate_model_selection_eval() -> None:
         "noninferiority_margin",
         "expected_jobs",
         "secrets.token_hex",
+        "features.multi_agent=false",
         "continue",
     ):
         require(token in runner, f"model selection runner に `{token}` が必要です。")
@@ -159,7 +254,7 @@ def validate_model_selection_eval() -> None:
         grading_root = session_dir / "grading"
         provenance_root.mkdir()
         grading_root.mkdir()
-        role = "examiner"
+        role = "sage"
         seed = 56
         evaluation_manifest = json.loads(json.dumps(manifest))
         manifest_sha256 = module._manifest_sha256(manifest_path)
@@ -358,6 +453,26 @@ def validate_model_selection_eval() -> None:
         require(summary.get("efficiency_proxy_recommendation") == expected_recommendation, "model selection summary は eligible / noninferior 5.6 candidateを集計してください。")
         compact_candidates = summary.get("model_effort_recommendations_by_prompt_profile", {}).get("compact", {}).get("candidate_pairs", [])
         require(all(not str(pair).startswith("gpt-5.5") for pair in compact_candidates), "regression controlをdeployment推薦候補へ含めないでください。")
+        require(
+            "gpt-5.6-luna/high" not in compact_candidates,
+            "diagnostic-onlyのSage effort challengerをdeployment推薦候補へ含めないでください。",
+        )
+        supplemental_comparisons = sequence(
+            summary.get("supplemental_effort_comparisons"),
+            "summary.supplemental_effort_comparisons",
+        )
+        require(
+            len(supplemental_comparisons) == len(prompt_profiles)
+            and all(
+                mapping(value, "summary.supplemental_effort_comparison").get("complete") is True
+                and mapping(value, "summary.supplemental_effort_comparison").get("reference_pair")
+                == "gpt-5.6-luna/xhigh"
+                and mapping(value, "summary.supplemental_effort_comparison").get("challenger_pair")
+                == "gpt-5.6-luna/high"
+                for value in supplemental_comparisons
+            ),
+            "Sage effort-only comparisonをprompt profileごとに独立集計してください。",
+        )
         require(summary.get("configured_pair_matches_efficiency_proxy") is True, "model selection summary は configured pair との一致を検証してください。")
         require(summary.get("final_task_outcomes_pass") is True, "paired profileをfinal task単位でhard-gate集計してください。")
         require(
@@ -391,6 +506,40 @@ def validate_model_selection_eval() -> None:
             summary.get("formal_recommendation_blockers"),
             "confirmatory条件が未完了ならformal recommendation blockerを列挙してください。",
         )
+
+        elapsed_metrics_path = next(grading_root.glob("*/run_metrics.json"))
+        original_elapsed_metrics = json.loads(elapsed_metrics_path.read_text(encoding="utf-8"))
+
+        def refresh_grading_input_attestations() -> None:
+            grading_input_sha256 = module._grading_input_bundle_sha256(grading_root)
+            for grader_path in grading_root.glob("*/grader.json"):
+                grader = json.loads(grader_path.read_text(encoding="utf-8"))
+                grader["grading_package_input_sha256"] = grading_input_sha256
+                grader_path.write_text(json.dumps(grader), encoding="utf-8")
+
+        def require_elapsed_rejection(value: object, label: str, *, missing: bool = False) -> None:
+            metrics = dict(original_elapsed_metrics)
+            if missing:
+                metrics.pop("elapsed_seconds")
+            else:
+                metrics["elapsed_seconds"] = value
+            elapsed_metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+            refresh_grading_input_attestations()
+            try:
+                module._summarize(session_dir, evaluation_manifest, manifest_path=manifest_path)
+            except module.EvalConfigError:
+                return
+            require(False, f"elapsed_secondsの{label}をEvalConfigErrorで拒否してください。")
+
+        require_elapsed_rejection(None, "欠損", missing=True)
+        require_elapsed_rejection("one second", "文字列")
+        require_elapsed_rejection(True, "bool")
+        require_elapsed_rejection(-1, "負値")
+        require_elapsed_rejection(float("nan"), "NaN")
+        require_elapsed_rejection(float("inf"), "Infinity")
+        elapsed_metrics_path.write_text(json.dumps(original_elapsed_metrics), encoding="utf-8")
+        refresh_grading_input_attestations()
+
         compact_job = next(job for job in expected_jobs if job["prompt_profile"] == "compact")
         compact_grader_path = grading_root / compact_job["blind_label"] / "grader.json"
         compact_grader = json.loads(compact_grader_path.read_text(encoding="utf-8"))
@@ -491,34 +640,52 @@ def validate_model_selection_eval() -> None:
         else:
             require(False, "文字列以外を含むselection hard gate集合をEvalConfigErrorで拒否してください。")
 
-        duplicate_root_effort_manifest = json.loads(json.dumps(manifest))
-        duplicate_root_effort_manifest["selection_policy"]["root_allowed_efforts"].append("max")
+        duplicate_root_mode_manifest = json.loads(json.dumps(manifest))
+        duplicate_root_mode_manifest["selection_policy"]["root_allowed_modes"].append("ultra")
         try:
-            module.validate_manifest(duplicate_root_effort_manifest)
+            module.validate_manifest(duplicate_root_mode_manifest)
         except module.EvalConfigError:
             pass
         else:
-            require(False, "重複したRoot allowed effort集合を拒否してください。")
+            require(False, "重複したRoot allowed mode集合を拒否してください。")
 
-        invalid_root_effort_type_manifest = json.loads(json.dumps(manifest))
-        invalid_root_effort_type_manifest["selection_policy"]["root_allowed_efforts"].append({"invalid": True})
+        invalid_root_mode_type_manifest = json.loads(json.dumps(manifest))
+        invalid_root_mode_type_manifest["selection_policy"]["root_allowed_modes"].append({"invalid": True})
         try:
-            module.validate_manifest(invalid_root_effort_type_manifest)
+            module.validate_manifest(invalid_root_mode_type_manifest)
         except module.EvalConfigError:
             pass
         else:
-            require(False, "文字列以外を含むRoot allowed effort集合をEvalConfigErrorで拒否してください。")
+            require(False, "文字列以外を含むRoot allowed mode集合をEvalConfigErrorで拒否してください。")
 
-        root_max_routine_manifest = json.loads(json.dumps(manifest))
-        root_max_routine_manifest["roles"]["root"]["candidates"].append(
-            {"model": "gpt-5.6-sol", "effort": "max"}
+        root_max_mode_manifest = json.loads(json.dumps(manifest))
+        root_max_mode_manifest["selection_policy"]["root_allowed_modes"][2] = "max"
+        try:
+            module.validate_manifest(root_max_mode_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "Root runtime modeを旧high/xhigh/max契約へ戻さないでください。")
+
+        root_ultra_component_manifest = json.loads(json.dumps(manifest))
+        root_ultra_component_manifest["roles"]["root"]["candidates"].append(
+            {"model": "gpt-5.6-sol", "effort": "ultra"}
         )
         try:
-            module.validate_manifest(root_max_routine_manifest)
+            module.validate_manifest(root_ultra_component_manifest)
         except module.EvalConfigError:
             pass
         else:
-            require(False, "Root maxをroutine eval matrixへ含めないでください。")
+            require(False, "Root ultraをmulti_agent=falseのcomponent effort候補へ含めないでください。")
+
+        multi_agent_component_manifest = json.loads(json.dumps(manifest))
+        multi_agent_component_manifest["selection_policy"]["component_eval_multi_agent"] = True
+        try:
+            module.validate_manifest(multi_agent_component_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "component evalでmulti-agent orchestrationを有効にしないでください。")
 
         sage_medium_manifest = json.loads(json.dumps(manifest))
         sage_medium_manifest["roles"]["sage"]["candidates"][0]["effort"] = "medium"
@@ -529,23 +696,71 @@ def validate_model_selection_eval() -> None:
         else:
             require(False, "Sageのphase one候補をhigh未満へ下げないでください。")
 
-        premature_guildmaster_high_manifest = json.loads(json.dumps(manifest))
-        premature_guildmaster_high_manifest["roles"]["guildmaster"]["selected_pair"]["effort"] = "high"
+        missing_sage_effort_override_manifest = json.loads(json.dumps(manifest))
+        missing_sage_effort_override_manifest["selection_policy"]["model_tier_comparison_effort_overrides"].pop("sage")
         try:
-            module.validate_manifest(premature_guildmaster_high_manifest)
+            module.validate_manifest(missing_sage_effort_override_manifest)
         except module.EvalConfigError:
             pass
         else:
-            require(False, "測定前にGuildmasterをhighへ固定しないでください。")
+            require(False, "Sage xhigh model-tier比較のrole別effort override欠落を拒否してください。")
 
-        premature_inquisitor_xhigh_manifest = json.loads(json.dumps(manifest))
-        premature_inquisitor_xhigh_manifest["roles"]["inquisitor"]["selected_pair"]["effort"] = "xhigh"
+        mixed_sage_dimension_manifest = json.loads(json.dumps(manifest))
+        mixed_sage_dimension_manifest["roles"]["sage"]["candidates"].append(
+            {"model": "gpt-5.6-luna", "effort": "high"}
+        )
         try:
-            module.validate_manifest(premature_inquisitor_xhigh_manifest)
+            module.validate_manifest(mixed_sage_dimension_manifest)
         except module.EvalConfigError:
             pass
         else:
-            require(False, "測定前にInquisitorをxhighへ固定しないでください。")
+            require(False, "Sage Luna/high effort challengerをmodel-tier candidateへ混在させないでください。")
+
+        unknown_component_model_manifest = json.loads(json.dumps(manifest))
+        unknown_component_model_manifest["roles"]["sage"]["selected_pair"]["model"] = "gpt-5.6-oracle"
+        unknown_component_model_manifest["roles"]["sage"]["candidates"][0]["model"] = "gpt-5.6-oracle"
+        try:
+            module.validate_manifest(unknown_component_model_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "component model catalog外のcandidateを拒否してください。")
+
+        subagent_ultra_manifest = json.loads(json.dumps(manifest))
+        subagent_ultra_manifest["roles"]["sage"]["candidates"][0]["effort"] = "ultra"
+        try:
+            module.validate_manifest(subagent_ultra_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "Root orchestration専用のultraをsubagent pairへ設定しないでください。")
+
+        overlapping_group_manifest = json.loads(json.dumps(manifest))
+        overlapping_group_manifest["selection_policy"]["reasoning_comparison_roles"].append("adventurer")
+        try:
+            module.validate_manifest(overlapping_group_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "manifest-driven role groupsの重複を拒否してください。")
+
+        uncovered_role_manifest = json.loads(json.dumps(manifest))
+        uncovered_role_manifest["selection_policy"]["model_tier_comparison_roles"].remove("warden")
+        try:
+            module.validate_manifest(uncovered_role_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "manifest-driven role groupsで未分類roleを残さないでください。")
+
+        courier_changed_manifest = json.loads(json.dumps(manifest))
+        courier_changed_manifest["roles"]["courier"]["fixed_pair"]["model"] = "gpt-5.6-terra"
+        try:
+            module.validate_manifest(courier_changed_manifest)
+        except module.EvalConfigError:
+            pass
+        else:
+            require(False, "CourierのSpark/xhigh fixed pair変更を拒否してください。")
 
         prepared_root = test_root / "prepared"
         guild_root, _ = module._prepare_guild(manifest["cases"]["bounded_focus_regression"], prepared_root)

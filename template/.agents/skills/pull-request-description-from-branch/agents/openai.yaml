@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pull Request Description from Branch"
+  short_description: "ブランチの差分とコミットを確認し、コピー可能なPRタイトルと説明文を作ります"
+  default_prompt: "$pull-request-description-from-branch を使い、このブランチの差分からPRタイトルと説明文を作成してください。"

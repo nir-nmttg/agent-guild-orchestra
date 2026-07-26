@@ -1,0 +1,4 @@
+interface:
+  display_name: "Branch Implementation Final Review"
+  short_description: "実装差分をリスクに応じたread-only Trialで最終確認します"
+  default_prompt: "$branch-implementation-final-review を使い、このブランチの実装差分と検証結果を最終確認してください。"

@@ -2,6 +2,8 @@
 
 `AGENTS.md` が全roleに適用される安全・権限・委譲の正本です。このファイルはrole文書を手動で参照する場合の補助であり、custom agentの起動時promptへ重ねて読み込みません。
 
+Rootはtarget、authority、snapshot、queueを固定してassignmentを発行し、担当roleの完了を待ってevidenceをgateします。対象repoの探索、コード・差分・repo文書の読み取り、実装、validation、debug、review evidence収集はassignmentを受けたroleが行い、Rootへreportを返します。browser-control toolは例外としてRootだけが、roleが渡すobjective・URL・authority・許可操作どおりに実行して観測事実を記録します。roleはtoolを呼ばず、browser計画、許可操作の仕様化、観測根拠の解釈、reportを担います。
+
 ## 実行の基本
 
 1. assignmentのobjective、success criteria、scope、authority、snapshotを確認する。
@@ -30,5 +32,7 @@ handoffは次の核だけを必須にします。
 - validation evidence
 - helperが発行したsnapshot参照
 - unresolved blockerとresidual risk
+
+browserを使うhandoffには、objective、URL、authority、許可操作、Rootが記録した観測事実参照、roleの解釈を加えます。Rootはrepository workやbrowserの判断を代替しません。
 
 metadata、lineage、digest、status enumはqueue/helperが生成・検証します。agentは値を推測しません。

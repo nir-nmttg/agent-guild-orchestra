@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Skill Candidate from Gap"
+  short_description: "検証済みの能力ギャップから隔離されたSkill候補を作成します"
+  default_prompt: "$create-skill-candidate-from-gap を使い、sanitized capability-gap evidenceから隔離されたSkill候補を作成してください。"

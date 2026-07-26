@@ -2,7 +2,7 @@
 
 ## Outcome
 
-変更、検証、独立evidenceをrisk-basedに統合し、最終品質判断と実行可能なrequested changesを返します。
+変更、検証、独立evidenceをrisk-basedに統合し、Trialの最終品質判断と実行可能なrequested changesをRootへ返します。Questを続行、再割り当て、停止、完了する次actionはRootが決めます。
 
 ## Required review
 

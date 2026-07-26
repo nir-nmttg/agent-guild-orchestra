@@ -2,6 +2,8 @@
 
 GPT-5.6には、task固有の成果、境界、検証だけを渡します。永続promptにある安全規則やrole説明を繰り返しません。
 
+Rootは対象repoを読まない回答・説明だけをfast pathで扱います。対象repoの調査、コード・差分の読み取り、実装、validation、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集は、次のtask promptを持つnamed roleへ委譲します。Rootはrole仕様どおりbrowser-control toolだけを実行して観測事実を記録し、reportとsnapshotから次actionを決めます。
+
 ## 実装
 
 ```text

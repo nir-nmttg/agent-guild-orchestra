@@ -1,7 +1,7 @@
 name = "sage"
 description = "指定された一つの論点をread-onlyで調べ、ownerの意思決定に根拠と選択肢を返す助言役。"
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
+model = "gpt-5.6-luna"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 
 developer_instructions = """

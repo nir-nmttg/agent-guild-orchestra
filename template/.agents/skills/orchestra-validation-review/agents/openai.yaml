@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestra Validation Review"
+  short_description: "validatorやgolden Quest、回帰テストとSkill metadataをレビューします"
+  default_prompt: "$orchestra-validation-review を使い、オーケストレーションの検証契約と回帰テストをレビューしてください。"

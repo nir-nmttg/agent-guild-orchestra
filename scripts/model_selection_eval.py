@@ -94,7 +94,7 @@ COMPACT_CORE_CONTRACT = """# Compact evaluation contract
 - 依頼された成果を完遂し、判定に必要な根拠、検証、重要な留保、次のactionを残す。
 """
 ROLE_FIXTURE_PREFIXES = {
-    "root": ("safety_", "solo_"),
+    "root": ("root_", "safety_", "solo_"),
     "adventurer": ("solo_", "safety_"),
     "sage": ("sage_",),
     "cartographer": ("mapmaking_",),
@@ -188,8 +188,8 @@ def _validate_pair(value: object, label: str) -> dict[str, str]:
 
 
 def validate_manifest(manifest: dict[str, Any]) -> None:
-    if manifest.get("version") != "1.0":
-        raise EvalConfigError("manifest.version は 1.0 にしてください。")
+    if manifest.get("version") != "2.0":
+        raise EvalConfigError("manifest.version は 2.0 にしてください。")
     data_policy = _mapping(manifest.get("data_policy"), "data_policy")
     if data_policy != {
         "fixture_source": "synthetic_only",
@@ -208,25 +208,84 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     policy = _mapping(manifest.get("selection_policy"), "selection_policy")
     if policy.get("fixed_pair_per_subagent") is not True or policy.get("dynamic_effort_allowed") is not False:
         raise EvalConfigError("selection_policy は subagent ごとの固定 pair と dynamic effort 禁止を要求してください。")
+    component_model_catalog = _sequence(
+        policy.get("component_model_catalog"),
+        "selection_policy.component_model_catalog",
+    )
+    if (
+        not component_model_catalog
+        or any(not isinstance(value, str) or not value.startswith("gpt-5.6-") for value in component_model_catalog)
+        or len(component_model_catalog) != len(set(component_model_catalog))
+    ):
+        raise EvalConfigError("component model catalog は重複しない5.6 series model listにしてください。")
+    subagent_allowed_efforts = _sequence(
+        policy.get("subagent_allowed_efforts"),
+        "selection_policy.subagent_allowed_efforts",
+    )
+    if (
+        any(not isinstance(value, str) for value in subagent_allowed_efforts)
+        or len(subagent_allowed_efforts) != len(set(subagent_allowed_efforts))
+        or set(subagent_allowed_efforts) != {"high", "xhigh"}
+    ):
+        raise EvalConfigError("Subagent reasoning effort は high / xhigh の固定 pairだけを許可してください。")
     if policy.get("migration_same_effort_comparison_required") is not True:
         raise EvalConfigError("migration same-effort comparison を必須にしてください。")
     if policy.get("phase_one_reasoning_floor") != "high":
         raise EvalConfigError("phase one は high 未満のreasoning effortを候補にしないでください。")
     if policy.get("root_user_configurable_effort") is not True:
         raise EvalConfigError("Root reasoning effort は利用者がhigh以上から選べるようにしてください。")
-    if policy.get("root_default_effort") != "high":
-        raise EvalConfigError("Root reasoning effort の既定値は high にしてください。")
-    root_allowed_efforts = _sequence(policy.get("root_allowed_efforts"), "selection_policy.root_allowed_efforts")
+    if policy.get("root_runtime_effort_pinned") is not False:
+        raise EvalConfigError("Root runtime reasoning effort は固定しないでください。")
+    root_allowed_modes = _sequence(policy.get("root_allowed_modes"), "selection_policy.root_allowed_modes")
     if (
-        any(not isinstance(value, str) for value in root_allowed_efforts)
-        or len(root_allowed_efforts) != len(set(root_allowed_efforts))
-        or set(root_allowed_efforts) != {"high", "xhigh", "max"}
+        any(not isinstance(value, str) for value in root_allowed_modes)
+        or len(root_allowed_modes) != len(set(root_allowed_modes))
+        or set(root_allowed_modes) != {"high", "xhigh", "ultra"}
     ):
-        raise EvalConfigError("Root reasoning effort は high / xhigh / max だけを許可してください。")
-    if policy.get("root_max_requires_explicit_user_selection") is not True:
-        raise EvalConfigError("Root max は利用者の明示選択だけにしてください。")
-    if policy.get("max_in_routine_eval") is not False:
-        raise EvalConfigError("max はroutine model selection matrixへ含めないでください。")
+        raise EvalConfigError("Root reasoning mode は high / xhigh / ultra だけを許可してください。")
+    root_component_efforts = _sequence(
+        policy.get("root_component_eval_efforts"),
+        "selection_policy.root_component_eval_efforts",
+    )
+    if (
+        any(not isinstance(value, str) for value in root_component_efforts)
+        or len(root_component_efforts) != len(set(root_component_efforts))
+        or set(root_component_efforts) != {"high", "xhigh"}
+    ):
+        raise EvalConfigError("Root component eval は high / xhigh のeffort比較だけにしてください。")
+    if policy.get("root_component_reference_effort") != "high":
+        raise EvalConfigError("Root component eval のreference effortはhighにしてください。")
+    if policy.get("root_ultra_mode") != "orchestration" or policy.get("ultra_in_scope") is not True:
+        raise EvalConfigError("Root ultra は対象内のorchestration modeとして定義してください。")
+    if policy.get("component_eval_multi_agent") is not False:
+        raise EvalConfigError("component eval は multi_agent=false にしてください。")
+    ultra_exclusion_reason = policy.get("ultra_component_eval_exclusion_reason")
+    if not isinstance(ultra_exclusion_reason, str) or not ultra_exclusion_reason.strip():
+        raise EvalConfigError("ultraをcomponent evalから分離する理由を明示してください。")
+    if "ultra" in root_component_efforts:
+        raise EvalConfigError("ultraはcomponent effort候補ではなくorchestration modeとして評価してください。")
+    if policy.get("model_tier_comparison_effort") != "high":
+        raise EvalConfigError("model tier comparison effortはhighに固定してください。")
+    model_tier_effort_overrides = _mapping(
+        policy.get("model_tier_comparison_effort_overrides"),
+        "selection_policy.model_tier_comparison_effort_overrides",
+    )
+    if (
+        any(not isinstance(role, str) or not role for role in model_tier_effort_overrides)
+        or any(effort not in subagent_allowed_efforts for effort in model_tier_effort_overrides.values())
+        or any(effort == policy["model_tier_comparison_effort"] for effort in model_tier_effort_overrides.values())
+    ):
+        raise EvalConfigError("model tier effort overrideはrole別の非冗長なhigh/xhigh指定にしてください。")
+    reasoning_comparison_efforts = _sequence(
+        policy.get("reasoning_comparison_efforts"),
+        "selection_policy.reasoning_comparison_efforts",
+    )
+    if (
+        any(not isinstance(value, str) for value in reasoning_comparison_efforts)
+        or len(reasoning_comparison_efforts) != len(set(reasoning_comparison_efforts))
+        or set(reasoning_comparison_efforts) != {"high", "xhigh"}
+    ):
+        raise EvalConfigError("subagent reasoning comparison は high / xhigh だけにしてください。")
     hard_gates = _sequence(policy.get("hard_gate_zero_tolerance"), "selection_policy.hard_gate_zero_tolerance")
     if (
         any(not isinstance(value, str) for value in hard_gates)
@@ -328,39 +387,59 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     safety_margin = grading_policy.get("safety_case_noninferiority_margin")
     if not isinstance(safety_margin, (int, float)) or isinstance(safety_margin, bool) or not 0 <= float(safety_margin) <= float(margin):
         raise EvalConfigError("safety case margin は0..overall marginにしてください。")
-    required_roles = {
-        "root",
-        "adventurer",
-        "sage",
-        "cartographer",
-        "courier",
-        "examiner",
-        "guildmaster",
-        "inquisitor",
-        "artificer",
-        "captain",
-        "warden",
-    }
+    required_roles = set(ROLE_FIXTURE_PREFIXES)
     if set(roles) != required_roles:
         raise EvalConfigError("roles が固定 pair の全 role と一致しません。")
 
-    model_tier_roles = set(_sequence(policy.get("model_tier_comparison_roles"), "selection_policy.model_tier_comparison_roles"))
-    reasoning_roles = set(_sequence(policy.get("reasoning_comparison_roles"), "selection_policy.reasoning_comparison_roles"))
-    fixed_pair_roles = set(_sequence(policy.get("fixed_pair_roles"), "selection_policy.fixed_pair_roles"))
-    if model_tier_roles != {"adventurer", "sage", "cartographer", "examiner", "warden"}:
-        raise EvalConfigError("model tier comparison roles が合意済みのbounded role集合と一致しません。")
-    if reasoning_roles != {"root", "guildmaster", "inquisitor"}:
-        raise EvalConfigError("reasoning comparison roles は Root / guildmaster / inquisitor に限定してください。")
-    if fixed_pair_roles != {"artificer", "captain", "courier"}:
-        raise EvalConfigError("fixed pair roles は artificer / captain / courier にしてください。")
-    if model_tier_roles | reasoning_roles | fixed_pair_roles != required_roles:
-        raise EvalConfigError("selection policy のrole groupsは全roleを重複なく覆ってください。")
-    if (model_tier_roles & reasoning_roles) or (model_tier_roles & fixed_pair_roles) or (reasoning_roles & fixed_pair_roles):
-        raise EvalConfigError("selection policy のrole groupsを重複させないでください。")
+    def role_group(field: str) -> set[str]:
+        raw_values = _sequence(policy.get(field), f"selection_policy.{field}")
+        if any(not isinstance(value, str) or not value for value in raw_values):
+            raise EvalConfigError(f"selection_policy.{field} はrole名のlistにしてください。")
+        if len(raw_values) != len(set(raw_values)):
+            raise EvalConfigError(f"selection_policy.{field} のroleを重複させないでください。")
+        values = set(raw_values)
+        unknown = values - required_roles
+        if unknown:
+            raise EvalConfigError(f"selection_policy.{field} に未知roleがあります: {sorted(unknown)}")
+        return values
+
+    root_component_roles = role_group("root_component_comparison_roles")
+    model_tier_roles = role_group("model_tier_comparison_roles")
+    reasoning_roles = role_group("reasoning_comparison_roles")
+    fixed_pair_roles = role_group("fixed_pair_roles")
+    role_groups = (root_component_roles, model_tier_roles, reasoning_roles, fixed_pair_roles)
+    grouped_roles = set().union(*role_groups)
+    duplicate_roles = {
+        role
+        for role in required_roles
+        if sum(role in group for group in role_groups) > 1
+    }
+    if grouped_roles != required_roles:
+        raise EvalConfigError("selection policy のrole groupsは全roleを覆ってください。")
+    if duplicate_roles:
+        raise EvalConfigError(f"selection policy のrole groupsを重複させないでください: {sorted(duplicate_roles)}")
+    if root_component_roles != {"root"}:
+        raise EvalConfigError("root_component_comparison_roles はRootだけにしてください。")
+    if "courier" not in fixed_pair_roles:
+        raise EvalConfigError("courierは現状維持のfixed pair roleにしてください。")
+    unknown_model_tier_effort_overrides = set(model_tier_effort_overrides) - model_tier_roles
+    if unknown_model_tier_effort_overrides:
+        raise EvalConfigError(
+            "model tier effort overrideはmodel_tier_comparison_rolesだけを対象にしてください: "
+            f"{sorted(unknown_model_tier_effort_overrides)}"
+        )
 
     for role, raw_role in roles.items():
         role_data = _mapping(raw_role, f"roles.{role}")
-        allowed_role_keys = {"sandbox", "cases", "selected_pair", "candidates", "regression_control", "regression_control_basis"}
+        allowed_role_keys = {
+            "sandbox",
+            "cases",
+            "selected_pair",
+            "candidates",
+            "regression_control",
+            "regression_control_basis",
+            "supplemental_effort_comparison",
+        }
         if role_data.get("selection_excluded") is True:
             allowed_role_keys = {"sandbox", "cases", "selection_excluded", "fixed_pair", "exclusion_reason"}
         unknown_role_keys = set(role_data) - allowed_role_keys
@@ -384,13 +463,13 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             exclusion_reason = role_data.get("exclusion_reason")
             if not isinstance(exclusion_reason, str) or not exclusion_reason.strip():
                 raise EvalConfigError(f"roles.{role}.exclusion_reason が必要です。")
-            expected_fixed = {
-                "artificer": {"model": "gpt-5.6-sol", "effort": "high"},
-                "captain": {"model": "gpt-5.6-sol", "effort": "high"},
-                "courier": {"model": "gpt-5.3-codex-spark", "effort": "xhigh"},
-            }
-            if fixed != expected_fixed[role]:
-                raise EvalConfigError(f"roles.{role}.fixed_pair が合意済み設定と一致しません。")
+            if fixed["effort"] not in subagent_allowed_efforts:
+                raise EvalConfigError(f"roles.{role}.fixed_pair effortはsubagent allowed effortsから選んでください。")
+            if role == "courier":
+                if fixed != {"model": "gpt-5.3-codex-spark", "effort": "xhigh"}:
+                    raise EvalConfigError("roles.courier.fixed_pair は現状のSpark/xhighを維持してください。")
+            elif fixed["model"] not in component_model_catalog:
+                raise EvalConfigError(f"roles.{role}.fixed_pair はcomponent model catalogから選んでください。")
             continue
         if role in fixed_pair_roles:
             raise EvalConfigError(f"roles.{role} はselection_excluded fixed pairにしてください。")
@@ -402,32 +481,94 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             _validate_pair(candidate, f"roles.{role}.candidates[{index}]")
             for index, candidate in enumerate(candidates)
         ]
-        if any(not pair["model"].startswith("gpt-5.6-") for pair in normalized_candidates):
-            raise EvalConfigError(f"roles.{role}.candidates は5.6 seriesだけにしてください。")
-        if any(pair["effort"] == "max" for pair in normalized_candidates):
-            raise EvalConfigError(f"roles.{role}.candidates にroutine eval対象外のmaxを含めないでください。")
+        candidate_keys = {(pair["model"], pair["effort"]) for pair in normalized_candidates}
+        if len(candidate_keys) != len(normalized_candidates):
+            raise EvalConfigError(f"roles.{role}.candidates を重複させないでください。")
+        if any(pair["model"] not in component_model_catalog for pair in normalized_candidates):
+            raise EvalConfigError(f"roles.{role}.candidates はcomponent model catalogから選んでください。")
         if selected not in normalized_candidates:
             raise EvalConfigError(f"roles.{role}.selected_pair は candidates に含めてください。")
-        if role in model_tier_roles:
-            if selected != {"model": "gpt-5.6-sol", "effort": "high"}:
-                raise EvalConfigError(f"roles.{role}.selected_pair はlive非劣性確認まで Sol/high にしてください。")
-            if any(pair["effort"] != "high" for pair in normalized_candidates):
-                raise EvalConfigError(f"roles.{role} のphase oneはmodel差だけを比較するためeffortをhighに固定してください。")
-            expected_models = {"gpt-5.6-sol", "gpt-5.6-terra"}
-            if role == "sage":
-                expected_models.add("gpt-5.6-luna")
-            if {pair["model"] for pair in normalized_candidates} != expected_models:
-                raise EvalConfigError(f"roles.{role}.candidates のmodel tier集合が不正です。")
+        if role in root_component_roles:
+            if {pair["model"] for pair in normalized_candidates} != {selected["model"]}:
+                raise EvalConfigError("roles.root は同じmodelのcomponent effortだけを比較してください。")
+            if {pair["effort"] for pair in normalized_candidates} != set(root_component_efforts):
+                raise EvalConfigError("roles.root candidates はroot_component_eval_effortsと一致させてください。")
+            if selected["effort"] != policy["root_component_reference_effort"]:
+                raise EvalConfigError("roles.root.selected_pair はcomponent reference effortを使ってください。")
+        elif role in model_tier_roles:
+            comparison_effort = str(
+                model_tier_effort_overrides.get(role, policy["model_tier_comparison_effort"])
+            )
+            if any(pair["effort"] != comparison_effort for pair in normalized_candidates):
+                raise EvalConfigError(
+                    f"roles.{role} のphase oneはmodel差だけを比較するためeffortを{comparison_effort}に揃えてください。"
+                )
+            if len({pair["model"] for pair in normalized_candidates}) != len(normalized_candidates):
+                raise EvalConfigError(f"roles.{role}.candidates は異なるmodel tierだけを比較してください。")
         elif role in reasoning_roles:
-            if any(pair["model"] != "gpt-5.6-sol" for pair in normalized_candidates):
-                raise EvalConfigError(f"roles.{role} はSolのreasoning差だけを比較してください。")
-            if {pair["effort"] for pair in normalized_candidates} != {"high", "xhigh"}:
-                raise EvalConfigError(f"roles.{role} はhigh / xhighだけを比較してください。")
-            expected_selected_effort = "xhigh" if role == "guildmaster" else "high"
-            if selected != {"model": "gpt-5.6-sol", "effort": expected_selected_effort}:
-                raise EvalConfigError(f"roles.{role}.selected_pair は現行deployment値を維持してください。")
+            if len({pair["model"] for pair in normalized_candidates}) != 1:
+                raise EvalConfigError(f"roles.{role} は同じmodelのreasoning差だけを比較してください。")
+            if {pair["effort"] for pair in normalized_candidates} != set(reasoning_comparison_efforts):
+                raise EvalConfigError(f"roles.{role} candidates はreasoning_comparison_effortsと一致させてください。")
         else:
             raise EvalConfigError(f"roles.{role} がselection policyの比較roleに含まれていません。")
+        supplemental_effort_comparison = role_data.get("supplemental_effort_comparison")
+        if supplemental_effort_comparison is not None:
+            if role not in model_tier_roles:
+                raise EvalConfigError(
+                    f"roles.{role}.supplemental_effort_comparison はmodel-tier roleの別dimensionだけに使ってください。"
+                )
+            supplemental = _mapping(
+                supplemental_effort_comparison,
+                f"roles.{role}.supplemental_effort_comparison",
+            )
+            if set(supplemental) != {"recommendation_authority", "reference_pair", "challenger_pairs"}:
+                raise EvalConfigError(f"roles.{role}.supplemental_effort_comparison schemaが不正です。")
+            if supplemental.get("recommendation_authority") != "diagnostic_only":
+                raise EvalConfigError(
+                    f"roles.{role}.supplemental_effort_comparison はdeployment推薦から分離してください。"
+                )
+            reference_pair = _validate_pair(
+                supplemental.get("reference_pair"),
+                f"roles.{role}.supplemental_effort_comparison.reference_pair",
+            )
+            if reference_pair != selected:
+                raise EvalConfigError(
+                    f"roles.{role}.supplemental_effort_comparison referenceはselected pairにしてください。"
+                )
+            raw_challengers = _sequence(
+                supplemental.get("challenger_pairs"),
+                f"roles.{role}.supplemental_effort_comparison.challenger_pairs",
+            )
+            if not raw_challengers:
+                raise EvalConfigError(
+                    f"roles.{role}.supplemental_effort_comparison challengerを1件以上指定してください。"
+                )
+            challengers = [
+                _validate_pair(
+                    value,
+                    f"roles.{role}.supplemental_effort_comparison.challenger_pairs[{index}]",
+                )
+                for index, value in enumerate(raw_challengers)
+            ]
+            challenger_keys = {(pair["model"], pair["effort"]) for pair in challengers}
+            if len(challenger_keys) != len(challengers):
+                raise EvalConfigError(f"roles.{role}.supplemental effort challengersを重複させないでください。")
+            if any(
+                pair["model"] != selected["model"]
+                or pair["effort"] == selected["effort"]
+                or pair["effort"] not in subagent_allowed_efforts
+                or (pair["model"], pair["effort"]) in candidate_keys
+                for pair in challengers
+            ):
+                raise EvalConfigError(
+                    f"roles.{role}.supplemental effort challengerはselected model固定・別effort・primary candidate外にしてください。"
+                )
+        if role != "root" and any(
+            pair["effort"] not in subagent_allowed_efforts
+            for pair in [selected, *normalized_candidates]
+        ):
+            raise EvalConfigError(f"roles.{role} はsubagent allowed effortsから固定pairを選んでください。")
         regression = role_data.get("regression_control")
         if regression is not None:
             regression_pair = _validate_pair(regression, f"roles.{role}.regression_control")
@@ -1272,6 +1413,12 @@ def _estimate_usage_cost(usage: object, model_price: object, label: str) -> floa
     ) / 1_000_000
 
 
+def _non_negative_finite_number(value: object, label: str) -> float:
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+        raise EvalConfigError(f"{label} は0以上の有限な数値にしてください。")
+    return float(value)
+
+
 def _count_tool_events(jsonl: str) -> int:
     count = 0
     for line in jsonl.splitlines():
@@ -1325,6 +1472,19 @@ def _candidate_list(role_data: dict[str, Any], *, include_regression: bool = Tru
     if include_regression and role_data.get("regression_control") is not None:
         pairs.append({**_validate_pair(role_data.get("regression_control"), "regression_control"), "source": "regression_control"})
     pairs.extend({**_validate_pair(value, "candidate"), "source": "candidate"} for value in role_data["candidates"])
+    supplemental = role_data.get("supplemental_effort_comparison")
+    if supplemental is not None:
+        comparison = _mapping(supplemental, "supplemental_effort_comparison")
+        pairs.extend(
+            {
+                **_validate_pair(value, "supplemental_effort_comparison.challenger_pair"),
+                "source": "effort_challenger",
+            }
+            for value in _sequence(
+                comparison.get("challenger_pairs"),
+                "supplemental_effort_comparison.challenger_pairs",
+            )
+        )
     return pairs
 
 
@@ -1886,9 +2046,12 @@ def _summarize(
         or timeout_cleanup_probe.get("protocol") != "agent-guild-orchestra-detached-child-probe-v1"
         or timeout_cleanup_probe.get("passed") is not True
         or timeout_cleanup_probe.get("detached_child_marker_observed") is not False
-        or not isinstance(timeout_cleanup_probe.get("elapsed_seconds"), (int, float))
     ):
         raise EvalConfigError("session timeout cleanup probe evidence が不正です。")
+    _non_negative_finite_number(
+        timeout_cleanup_probe.get("elapsed_seconds"),
+        "session timeout cleanup probe elapsed_seconds",
+    )
     selection_complete = private_session.get("selection_complete_expected") is True
     if session.get("selection_complete_expected") is not selection_complete:
         raise EvalConfigError("selection completeness metadata が一致しません。")
@@ -2093,6 +2256,10 @@ def _summarize(
             not isinstance(value, bool) for value in automatic_final_outcome_violations.values()
         ):
             raise EvalConfigError(f"{blind_label} automatic final outcome evidence が不正です。")
+        elapsed_seconds = _non_negative_finite_number(
+            metrics.get("elapsed_seconds"),
+            f"{blind_label} metrics.elapsed_seconds",
+        )
         prompt_layer_metrics = _mapping(
             provenance.get("prompt_layer_metrics"),
             f"{blind_label}.provenance.prompt_layer_metrics",
@@ -2170,7 +2337,7 @@ def _summarize(
                 "prompt_cache_write_equivalent_estimated_tokens": prompt_layer_metrics.get(
                     "cache_write_equivalent_estimated_tokens"
                 ),
-                "elapsed_seconds": metrics.get("elapsed_seconds"),
+                "elapsed_seconds": elapsed_seconds,
                 "estimated_cost": estimated_cost,
             }
         )
@@ -2255,8 +2422,9 @@ def _summarize(
     quality_first = role in set(str(value) for value in _sequence(selection_policy.get("quality_first_roles"), "quality_first_roles"))
     overall_margin = float(grading_policy["noninferiority_margin"])
     safety_margin = float(grading_policy["safety_case_noninferiority_margin"])
+    primary_eligible = [pair for pair in eligible if pair["source"] != "effort_challenger"]
     best_by_case: dict[tuple[str, str], tuple[dict[str, Any], dict[str, Any]]] = {}
-    for pair in eligible:
+    for pair in primary_eligible:
         for case_result in pair["case_results"]:
             case_id = str(case_result["case_id"])
             comparison_key = (str(pair["prompt_profile"]), case_id)
@@ -2264,6 +2432,12 @@ def _summarize(
             if current is None or case_result["mean_quality_score"] > current[1]["mean_quality_score"]:
                 best_by_case[comparison_key] = (pair, case_result)
     for pair in pairs:
+        if pair["source"] == "effort_challenger":
+            pair["selection_dimension"] = "supplemental_effort_diagnostic"
+            pair["noninferiority_by_case"] = []
+            pair["noninferior_all_cases"] = False
+            continue
+        pair["selection_dimension"] = "primary_model_or_effort_selection"
         checks: list[dict[str, Any]] = []
         for case_result in pair["case_results"]:
             case_id = str(case_result["case_id"])
@@ -2298,6 +2472,53 @@ def _summarize(
             )
         pair["noninferiority_by_case"] = checks
         pair["noninferior_all_cases"] = bool(checks) and all(check["passes"] for check in checks)
+
+    supplemental_effort_comparisons: list[dict[str, Any]] = []
+    raw_supplemental = role_data.get("supplemental_effort_comparison")
+    if raw_supplemental is not None:
+        supplemental = _mapping(raw_supplemental, "supplemental_effort_comparison")
+        reference = _validate_pair(
+            supplemental.get("reference_pair"),
+            "supplemental_effort_comparison.reference_pair",
+        )
+        reference_name = f"{reference['model']}/{reference['effort']}"
+        for raw_challenger in _sequence(
+            supplemental.get("challenger_pairs"),
+            "supplemental_effort_comparison.challenger_pairs",
+        ):
+            challenger = _validate_pair(raw_challenger, "supplemental_effort_comparison.challenger_pair")
+            challenger_name = f"{challenger['model']}/{challenger['effort']}"
+            for prompt_profile in _mapping(manifest["prompt_profiles"], "prompt_profiles"):
+                reference_result = next(
+                    (
+                        pair for pair in pairs
+                        if pair["prompt_profile"] == prompt_profile
+                        and pair["pair"] == reference_name
+                        and pair["source"] == "candidate"
+                    ),
+                    None,
+                )
+                challenger_result = next(
+                    (
+                        pair for pair in pairs
+                        if pair["prompt_profile"] == prompt_profile
+                        and pair["pair"] == challenger_name
+                        and pair["source"] == "effort_challenger"
+                    ),
+                    None,
+                )
+                supplemental_effort_comparisons.append(
+                    {
+                        "comparison_dimension": "effort_only",
+                        "recommendation_authority": "diagnostic_only",
+                        "prompt_profile": prompt_profile,
+                        "reference_pair": reference_name,
+                        "challenger_pair": challenger_name,
+                        "complete": reference_result is not None and challenger_result is not None,
+                        "reference_result": reference_result,
+                        "challenger_result": challenger_result,
+                    }
+                )
     model_effort_recommendations_by_prompt_profile: dict[str, dict[str, Any]] = {}
     for prompt_profile in _mapping(manifest["prompt_profiles"], "prompt_profiles"):
         profile_eligible = [
@@ -2488,6 +2709,7 @@ def _summarize(
         "pairs": pairs,
         "model_effort_reference_prompt_profile": model_effort_reference_profile,
         "model_effort_recommendations_by_prompt_profile": model_effort_recommendations_by_prompt_profile,
+        "supplemental_effort_comparisons": supplemental_effort_comparisons,
         "paired_prompt_profile_comparisons": paired_prompt_profile_comparisons,
         "prompt_profile_noninferiority_recommendation": prompt_profile_recommendation,
         "final_task_outcomes": final_task_outcomes,

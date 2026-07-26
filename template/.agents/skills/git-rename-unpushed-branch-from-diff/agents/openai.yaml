@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Rename Unpushed Branch from Diff"
+  short_description: "現在の差分を基に、未pushと確認できたブランチだけを安全に改名します"
+  default_prompt: "$git-rename-unpushed-branch-from-diff を使い、現在の差分に合う名前へ未pushブランチを安全に変更してください。"

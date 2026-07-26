@@ -1,15 +1,23 @@
 id: courier_explicit_git_postcondition
 fixture_mode: static_contract_example
-summary: "courier は人間が明示指定したコマンド実行系Skillの定義済み Git 操作だけを行い、実行後の状態を確認する"
+summary: "Root が境界を固定したassignmentにより、courierだけが可逆allowlistのlocal Git操作を行い、実行後の状態を確認する"
 input:
-  latest_human_instruction: "git-split-commits-from-diff Skill を対象子リポジトリで実行してください"
   target_repo_root: "<guild_root>/repositories/example-app"
   branch: "codex/fix-csv-import"
-  accepted_revision_id: "commit:ea11390"
-  accepted_diff_hash: "sha256:0f19de22"
   allowed_paths:
     - src/import.py
     - tests/test_import.py
+  subject_snapshot:
+    digest_version: agent-guild-orchestra-snapshot-v1
+    kind: working_tree_content
+    revision_id: "commit:ea11390"
+    base_ref: "commit:ea11390"
+    head_ref: null
+    diff_hash: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
+    dirty_state: dirty
+    scope_paths: [src/import.py, tests/test_import.py]
+    untracked_paths: []
+    snapshot_id: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
 expected:
   worker_id: courier
   authority:
@@ -19,18 +27,28 @@ expected:
     local_git: true
     external_actions: false
   authorization:
-    source: explicit_human_skill_invocation
+    source: root_scoped_courier_assignment
     skill_name: git-split-commits-from-diff
-    explicit_operation: stage_commit
-    allowed_operations: [stage, commit]
+    local_git_write_owner: courier
+    command_verbatim_repetition_required: false
+    allowed_operations: [stage_exact_paths_or_hunks, commit_non_amend]
     target_repo_root: "<guild_root>/repositories/example-app"
-    accepted_revision_id: "commit:ea11390"
-    accepted_diff_hash: "sha256:0f19de22"
-    allowed_paths:
-      - src/import.py
-      - tests/test_import.py
-    implicit_request_allowed: false
-    skill_defined_scope_only: true
+    path_or_ref_scope:
+      paths: [src/import.py, tests/test_import.py]
+    subject_snapshot:
+      digest_version: agent-guild-orchestra-snapshot-v1
+      kind: working_tree_content
+      revision_id: "commit:ea11390"
+      base_ref: "commit:ea11390"
+      head_ref: null
+      diff_hash: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
+      dirty_state: dirty
+      scope_paths: [src/import.py, tests/test_import.py]
+      untracked_paths: []
+      snapshot_id: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
+    required_assignment_fields: [target_repo_root, allowed_operations, path_or_ref_scope, subject_snapshot, preconditions, postconditions, forbidden_operations]
+    outside_allowlist: not_generally_authorized
+    closed_operation_allowlist: true
     safety_gates_bypassed: false
   preconditions:
     target_repo_root_confirmed: true
@@ -38,6 +56,19 @@ expected:
     git_status_inspected: true
     staged_diff_inspected: true
     unrelated_changes_excluded: true
+    snapshot_helper_reissued_same_kind_base_scope: true
+    preflight_snapshot_matches_assignment: true
+  preflight_snapshot:
+    digest_version: agent-guild-orchestra-snapshot-v1
+    kind: working_tree_content
+    revision_id: "commit:ea11390"
+    base_ref: "commit:ea11390"
+    head_ref: null
+    diff_hash: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
+    dirty_state: dirty
+    scope_paths: [src/import.py, tests/test_import.py]
+    untracked_paths: []
+    snapshot_id: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
   postconditions:
     git_status_checked: true
     commit_hash_recorded: true
@@ -48,8 +79,66 @@ expected:
     ledger_event_disposition_recorded: true
     committed_diff_matches_accepted_hash: true
     external_state_unchanged: true
+    postwrite_untracked_from_postwrite_state: true
+  postwrite_snapshot:
+    digest_version: agent-guild-orchestra-snapshot-v1
+    kind: working_tree_content
+    revision_id: "commit:bf117c0"
+    base_ref: "commit:bf117c0"
+    head_ref: null
+    diff_hash: "sha256:bf117c000000000000000000000000000000000000000000000000000000"
+    dirty_state: clean
+    scope_paths: [src/import.py, tests/test_import.py]
+    untracked_paths: []
+    snapshot_id: "sha256:bf117c000000000000000000000000000000000000000000000000000000"
+  destructive_operations:
+    requires_immediate_human_confirmation: [reset_head_move, reset_hard, worktree_reverting_checkout_or_restore, clean, commit_amend, rebase_or_filter, ref_branch_tag_delete_or_force_move, reflog_prune_or_recovery_difficult_gc, destructive_stash, forced_or_discarding_branch_switch]
+    authorized_in_this_assignment: []
   forbidden:
     push: true
     pull_request: true
     destructive_git: true
     unrelated_stage: true
+    root_or_other_role_local_git_write: true
+    general_branch_switch: true
+    broad_stage_pathspec: true
+  negative_cases:
+    stale_snapshot:
+      preflight: {same_kind_base_scope: true, snapshot_matches_assignment: false}
+      outcome: stale_evidence
+      git_write_executed: false
+    wrong_owner:
+      assignment_owner: adventurer
+      outcome: reject_wrong_owner
+      git_write_executed: false
+    outside_allowlist_operation:
+      requested_operation: merge
+      outcome: reject_outside_allowlist
+      git_write_executed: false
+    destructive_switch_without_reconfirmation:
+      requested_command: "git switch --discard-changes existing-branch"
+      immediate_human_confirmation: false
+      outcome: needs_human
+      git_write_executed: false
+    external_update_without_reconfirmation:
+      requested_operation: push
+      immediate_human_reconfirmation: false
+      outcome: needs_human
+      external_action_executed: false
+    canonical_snapshot_mismatch:
+      input_snapshot_id: "sha256:0f19de22000000000000000000000000000000000000000000000000000000"
+      authorization_snapshot_id: "sha256:mismatch000000000000000000000000000000000000000000000000000000"
+      outcome: stale_evidence
+      git_write_executed: false
+    target_repo_not_confirmed:
+      target_repo_root_confirmed: false
+      outcome: reject_preconditions
+      git_write_executed: false
+    committed_paths_scope_mismatch:
+      committed_paths_match_scope: false
+      outcome: reject_postconditions
+      git_write_executed: false
+    external_state_changed:
+      external_state_unchanged: false
+      outcome: reject_postconditions
+      git_write_executed: false

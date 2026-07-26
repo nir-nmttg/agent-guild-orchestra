@@ -15,13 +15,15 @@
 
 ## Lifecycle
 
-1. read-only回答や明白な小変更はfast pathで処理する。
+1. 対象repoを読まない回答・説明はRootのfast pathで処理し、対象repoに触れる小さな調査・変更は追加のplanning ceremonyなしで適切なcustom agentへ直接割り当てる。
 2. materialな作業はobjective、success criteria、scope、authority、validationを固定する。
-3. Rootが必要なcustom agentを直接起動する。custom agentは再委譲しない。
+3. Rootが必要なcustom agentを直接起動し、完了を待ってevidenceをgateし、次actionを決める。唯一のnested edgeである`inquisitor`→`examiner`以外は再委譲しない。
 4. `adventurer`は単一bounded scopeを実装する。
 5. 並列実装後の共有契約とglueは`artificer`がstable barrier上で統合する。
 6. risk-triggeredな独立確認は`inquisitor`が行い、必要な単一focusだけ`examiner`へ渡す。
 7. `courier`がLedger反映と、明示されたlocal Git操作だけを行う。
+
+Rootはtarget・authority・snapshot・queueのcontrol-plane確認、routing、待機、evidence gate、最終synthesisに加え、roleが仕様化したbrowser-control toolだけを実行して観測事実を記録します。対象repoの探索、コード・差分の読み取り、実装、test、browserの計画/解釈、debug、review evidence収集は担当roleへ委譲します。Rootが`high`、`xhigh`、`ultra`のどのreasoning effortで起動しても、このnamed-role topologyは変わりません。
 
 ## Roles
 

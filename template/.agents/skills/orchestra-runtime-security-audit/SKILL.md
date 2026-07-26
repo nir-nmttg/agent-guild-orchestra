@@ -1,8 +1,9 @@
 ---
 name: orchestra-runtime-security-audit
 description: "親リポジトリの Codex 実行環境について、config.toml、hooks、rules、sandbox、approval、network、MCP、secrets 方針を安全レビューする時に使います。"
-owner: agent-guild-orchestra
-scope: orchestration-template-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: orchestration-template-workflow
 ---
 
 # orchestra-runtime-security-audit

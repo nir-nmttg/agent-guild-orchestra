@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Guild Workflow"
+  short_description: "作業規模とリスクに合うQuest、担当role、検証経路を選んで進めます"
+  default_prompt: "$use-guild-workflow を使い、このリポジトリ作業を適切なQuestと担当roleへ割り当てて進めてください。"

@@ -7,7 +7,7 @@
 - fast pathとmaterial taskの分類
 - rankの説明
 - subagent roleごとのmodelと固定reasoning effort
-- Rootのreasoning effortは起動時/UI/global configなどで選択（runtime templateではproject-localに固定しない）
+- Rootのreasoning effortは起動時/UI/global configなどで`high / xhigh / ultra`から選択（runtime templateではproject-localに固定しない）
 - change-type別Trial check
 - evidence/outputの表現
 - worker並列数
@@ -31,7 +31,7 @@
 
 ## Role topology
 
-Rootだけがtop-level agentを起動します。nested delegationは`inquisitor`→terminal `examiner`の単一辺だけで、子のscopeとauthorityは親より狭くでき、helper-issued snapshotは親Trialと完全一致させます。親が完了を待って根拠を統合します。bounded実装とcross-scope integrationを別roleにし、read-heavy作業の並列化を優先します。
+Rootだけがtop-level agentを起動します。nested delegationは`inquisitor`→terminal `examiner`の単一辺だけで、子のscopeとauthorityは親より狭くでき、helper-issued snapshotは親Trialと完全一致させます。親が完了を待って根拠を統合します。Rootはcoordinationとjudgeに専念し、対象repoの調査、実装、validation、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集をnamed roleへ委譲します。browser-control toolだけはrole仕様どおりRootが実行し観測事実を記録します。`ultra`のproactive delegationでもこのtopologyを変えません。bounded実装とcross-scope integrationを別roleにし、read-heavy作業の並列化を優先します。
 
 role追加は、既存roleでは相反するauthority/model要件があり、代表taskの評価で品質改善が確認できる場合だけ行います。
 

@@ -1,4 +1,4 @@
-version: "4.0"
+version: "5.0"
 language: ja
 
 guild_runtime:
@@ -40,12 +40,12 @@ guild_law:
     - public_api_compatibility_change
     - external_network_enablement
   state_changes:
-    local_git_requires_explicit_operation: true
-    explicit_command_skill_invocation_authorizes_defined_operations: true
-    explicit_command_skill_invocation_scope: skill_defined_operations_and_human_target
+    read_only_git: {all_roles_in_assigned_read_scope: true, root_control_plane_repo_evidence_expansion: forbidden}
+    courier_local_git: {write_owner: courier, non_courier_write: forbidden, assignment_required_fields: [target_repo_root, allowed_operations, path_or_ref_scope, subject_snapshot, preconditions, postconditions, forbidden_operations], reversible_allowlist: [branch_create_and_switch_new, rename_origin_unpushed_branch, stage_exact_paths_or_hunks, unstage_index_only_exact_paths, commit_non_amend], closed_operation_allowlist: true, preflight_snapshot_must_match_assignment: true, postwrite_snapshot_required: true, root_scoped_assignment_authorizes_allowlist: true, human_command_verbatim_repetition_required: false, operations_outside_allowlist: not_generally_authorized, destructive_requires_immediate_human_confirmation: [reset_head_move, reset_hard, worktree_reverting_checkout_or_restore, clean, commit_amend, rebase_or_filter, ref_branch_tag_delete_or_force_move, reflog_prune_or_recovery_difficult_gc, destructive_stash, forced_or_discarding_branch_switch]}
     non_human_skill_reference_grants_authority: false
     scoped_skill_authority_bypasses_safety_gates: false
     external_update_requires_immediate_reconfirmation: true
+    candidate_materialization: {owner: adventurer, human_authorized_exact_path_required: true, path_pattern: <guild_root>/.orchestra/skill-candidates/<repo>/<candidate>, root_write_forbidden: true}
 
 contracts:
   assignment_core: [objective, success_criteria, scope, authority, subject_snapshot]
@@ -100,6 +100,23 @@ delegation:
     read_only: true
     decision_authority: false
 
+model_policy:
+  root_model: gpt-5.6-sol
+  root_project_local_reasoning_effort: unset
+  root_user_selectable_reasoning_efforts: [high, xhigh, ultra]
+  fixed_pair_per_subagent: true
+  subagent_pairs:
+    cartographer: {model: gpt-5.6-sol, model_reasoning_effort: high}
+    guildmaster: {model: gpt-5.6-sol, model_reasoning_effort: xhigh}
+    captain: {model: gpt-5.6-sol, model_reasoning_effort: high}
+    adventurer: {model: gpt-5.6-terra, model_reasoning_effort: high}
+    artificer: {model: gpt-5.6-sol, model_reasoning_effort: high}
+    inquisitor: {model: gpt-5.6-sol, model_reasoning_effort: xhigh}
+    examiner: {model: gpt-5.6-terra, model_reasoning_effort: high}
+    sage: {model: gpt-5.6-luna, model_reasoning_effort: xhigh}
+    warden: {model: gpt-5.6-sol, model_reasoning_effort: high}
+    courier: {model: gpt-5.3-codex-spark, model_reasoning_effort: xhigh}
+
 workers:
   cartographer:
     role: mapmaking_specialist
@@ -113,6 +130,7 @@ workers:
   adventurer:
     role: bounded_implementation_owner
     max_parallel: 32
+    candidate_materialization: human_authorized_exact_path_only
   artificer:
     role: cross_scope_artificer
     max_parallel: 1
@@ -187,8 +205,14 @@ trial:
   outcomes: [accept, accept_with_risks, request_changes, needs_human, blocked]
 
 root_session:
-  owns: [intake, target_repo_binding, authority_check, direct_assignment, report_synthesis]
-  forbids: [implementation, trial_acceptance, ledger_write]
+  control_plane_only: true
+  owns: [intake, target_repo_binding, authority_check, snapshot_request, direct_assignment, agent_wait, browser_control_tool_observation, report_evidence_gate, next_action, report_synthesis]
+  allowed_observations: [target_repo_identity, git_status, snapshot_helper, queue_state, browser_observation_facts]
+  delegated_work: [repository_exploration, implementation, validation_execution, browser_planning, browser_allowed_operation_specification, browser_evidence_interpretation, debugging, review_evidence_generation]
+  forbids: [repository_exploration, implementation, validation_execution, browser_execution, debugging, review_evidence_generation, trial_acceptance, ledger_write]
+  report_required_before_next_action: true
+  worker_unavailable_outcome: needs_human
+  ultra_mode: proactive_delegation_within_fixed_topology
 
 ledger:
   source_of_truth: .orchestra/queue/state.sqlite

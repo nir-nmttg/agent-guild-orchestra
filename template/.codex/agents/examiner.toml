@@ -1,6 +1,6 @@
 name = "examiner"
 description = "`inquisitor`が指定したTrialの単一focusを独立確認し、判定材料だけを返す検査役。"
-model = "gpt-5.6-sol"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 

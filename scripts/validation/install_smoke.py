@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import shutil
 import sqlite3
@@ -10,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from .core import ROOT, require
 from .rules import LEDGER_TABLES
@@ -19,7 +22,7 @@ AGENTS_END = "<!-- agent-guild-orchestra:end -->"
 EXCLUDE_START = "# agent-guild-orchestra:start"
 EXCLUDE_END = "# agent-guild-orchestra:end"
 BACKUP_DIRECTORY = ".agent-guild-orchestra-backups"
-RUNTIME_SCHEMA_VERSION = "3.0"
+RUNTIME_SCHEMA_VERSION = "4.0"
 
 READ_ONLY_AGENT_ROLES = (
     "sage",
@@ -42,9 +45,16 @@ EXPECTED_AGENT_FILES = {
     "captain.toml",
     "warden.toml",
 }
+EXPECTED_UPDATED_AGENT_PAIRS = {
+    "sage": ("gpt-5.6-luna", "xhigh"),
+    "inquisitor": ("gpt-5.6-sol", "xhigh"),
+}
 EXPECTED_SKILL_DIRS = {
     "branch-implementation-final-review",
     "browser-research-readonly",
+    "communicate-work-estimates",
+    "create-skill-candidate-from-gap",
+    "explain-clearly",
     "git-branch-from-session",
     "git-rename-unpushed-branch-from-diff",
     "git-split-commits-from-diff",
@@ -57,9 +67,12 @@ EXPECTED_SKILL_DIRS = {
     "orchestra-validation-review",
     "pull-request-description-from-branch",
     "quest-awareness-loop",
+    "refine-design-plan",
     "repository-design-mapmaking",
     "use-guild-workflow",
 }
+VSCODE_HELPER_REL = Path(".agents/skills/open-subrepo-in-vscode/scripts/open_repositories_in_vscode.py")
+CANDIDATE_VALIDATOR_REL = Path(".agents/skills/create-skill-candidate-from-gap/scripts/validate_skill_candidate.py")
 INSTALLED_OLD_TERM_TOKENS = (
     "fa" "ble",
     "meta" "cognitive",
@@ -94,6 +107,23 @@ def _run_install(*args: object) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _assert_release_documentation_contract() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    deployment = (ROOT / "docs/deployment-patterns.md").read_text(encoding="utf-8")
+    agent_deployment = (ROOT / "docs/agent-deployment.md").read_text(encoding="utf-8")
+    model_selection = (ROOT / "docs/model-selection-evaluation.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    for label, text in (("README", readme), ("deployment patterns", deployment), ("agent deployment", agent_deployment)):
+        require("--backup" in text, f"{label} は clean install の backup 要件を文書化してください。")
+        require("--allow-clean-install-without-backup" in text, f"{label} は clean install の明示的な backup なし escape hatch を文書化してください。")
+    for label, text in (("README", readme), ("agent deployment", agent_deployment), ("model selection", model_selection), ("CHANGELOG", changelog)):
+        require("30" in text and "synthetic" in text, f"{label} は30件のdeterministic synthetic contract traceを明記してください。")
+        require("negative" in text and "mutation" in text, f"{label} はnegative/mutation traceを明記してください。")
+        require("live" in text and ("未取得" in text or "未検証" in text), f"{label} はlive real-model fan-out matrixが未検証であることを明記してください。")
+        require("27" not in text, f"{label} に旧27 trace参照を残さないでください。")
+
+
 def _installed_text_paths(target: Path) -> list[Path]:
     text_suffixes = {".json", ".md", ".py", ".sh", ".sql", ".toml", ".txt", ".yaml", ".yml"}
     return sorted(
@@ -103,24 +133,59 @@ def _installed_text_paths(target: Path) -> list[Path]:
     )
 
 
-def _assert_installed_surface(target: Path) -> None:
+def _assert_installed_surface(target: Path, allowed_extra_skills: set[str] | None = None) -> None:
     require((target / "AGENTS.md").exists(), "install.py は AGENTS.md を生成してください。")
     require((target / ".codex/config.toml").exists(), "install.py は .codex/config.toml を導入してください。")
     root_config = INSTALLER.read_toml_document(target / ".codex/config.toml")
     require(root_config.get("model") == "gpt-5.6-sol", "install.py はRoot modelをSolにしてください。")
     require("model_reasoning_effort" not in root_config, "install.py はRoot reasoning effortをproject-localに出力しないでください。")
+    agents_config = root_config.get("agents")
+    require(
+        isinstance(agents_config, dict) and agents_config.get("job_max_runtime_seconds") == 2400,
+        "install.py は導入先のagents.job_max_runtime_secondsを2400秒にしてください。",
+    )
     agent_dir = target / ".codex/agents"
     actual_agents = {path.name for path in agent_dir.glob("*.toml")}
     require(actual_agents == EXPECTED_AGENT_FILES, ".codex/agents の導入 file set が期待値と一致しません: " + ", ".join(sorted(actual_agents)))
+    for role, expected_pair in EXPECTED_UPDATED_AGENT_PAIRS.items():
+        agent = INSTALLER.read_toml_document(agent_dir / f"{role}.toml")
+        require(
+            (agent.get("model"), agent.get("model_reasoning_effort")) == expected_pair,
+            f"install.py は導入先の{role} model/effortを{expected_pair[0]}/{expected_pair[1]}にしてください。",
+        )
     skill_dir = target / ".agents/skills"
     actual_skills = {path.name for path in skill_dir.iterdir() if path.is_dir()}
-    require(actual_skills == EXPECTED_SKILL_DIRS, ".agents/skills の導入 directory set が期待値と一致しません: " + ", ".join(sorted(actual_skills)))
+    expected_skills = EXPECTED_SKILL_DIRS | (allowed_extra_skills or set())
+    require(actual_skills == expected_skills, ".agents/skills の導入 directory set が期待値と一致しません: " + ", ".join(sorted(actual_skills)))
     for skill_name in sorted(EXPECTED_SKILL_DIRS):
         skill_path = skill_dir / skill_name / "SKILL.md"
         require(
             INSTALLER.read_skill_owner(skill_path) == "agent-guild-orchestra",
             f"{skill_path.relative_to(target)} の owner は agent-guild-orchestra にしてください。",
         )
+        openai_yaml = skill_dir / skill_name / "agents/openai.yaml"
+        require(openai_yaml.is_file(), f"{openai_yaml.relative_to(target)} を導入してください。")
+    installed_vscode_helper = target / VSCODE_HELPER_REL
+    source_vscode_helper = ROOT / "template" / VSCODE_HELPER_REL
+    require(installed_vscode_helper.is_file(), f"{VSCODE_HELPER_REL} を導入してください。")
+    require(
+        installed_vscode_helper.read_bytes() == source_vscode_helper.read_bytes(),
+        "install.py は VS Code launch helper を template と byte-identical に導入してください。",
+    )
+    installed_candidate_validator = target / CANDIDATE_VALIDATOR_REL
+    source_candidate_validator = ROOT / "template" / CANDIDATE_VALIDATOR_REL
+    require(installed_candidate_validator.is_file(), f"{CANDIDATE_VALIDATOR_REL} を導入してください。")
+    require(
+        installed_candidate_validator.read_bytes() == source_candidate_validator.read_bytes(),
+        "install.py は Skill candidate validator を template と byte-identical に導入してください。",
+    )
+    installed_candidate_root = target / ".orchestra/skill-candidates"
+    source_candidate_root = ROOT / "template/.agents/orchestra/skill-candidates"
+    require((installed_candidate_root / "README.md").is_file(), ".orchestra/skill-candidates/README.md を導入してください。")
+    require(
+        (installed_candidate_root / "README.md").read_bytes() == (source_candidate_root / "README.md").read_bytes(),
+        "install.py は candidate root marker を template と byte-identical に導入してください。",
+    )
     require((skill_dir / "quest-awareness-loop/SKILL.md").exists(), "install.py は quest-awareness-loop skill を導入してください。")
     require((target / ".agents/orchestra/docs/agent-memory.md").exists(), "install.py は agent-memory runtime artifact を導入してください。")
     require((target / ".orchestra/dashboard.md").exists(), "install.py は dashboard runtime artifact を .orchestra/dashboard.md に導入してください。")
@@ -130,11 +195,14 @@ def _assert_installed_surface(target: Path) -> None:
     with sqlite3.connect(database) as connection:
         schema_version = connection.execute("SELECT value FROM queue_metadata WHERE key = 'schema_version'").fetchone()
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    require(schema_version is not None and schema_version[0] == RUNTIME_SCHEMA_VERSION, "install.py は runtime DB schema_version を 3.0 にしてください。")
+    require(schema_version is not None and schema_version[0] == RUNTIME_SCHEMA_VERSION, "install.py は runtime DB schema_version を 4.0 にしてください。")
     missing_tables = sorted(LEDGER_TABLES - tables)
     require(not missing_tables, "install.py が初期化した runtime DB に不足 table があります: " + ", ".join(missing_tables))
     for path in _installed_text_paths(target):
-        text = path.read_text(encoding="utf-8").casefold()
+        try:
+            text = path.read_text(encoding="utf-8").casefold()
+        except UnicodeDecodeError:
+            continue
         for token in INSTALLED_OLD_TERM_TOKENS:
             require(token not in text, f"install.py の導入結果に旧語彙 `{token}` が残っています: {path.relative_to(target)}")
 
@@ -315,7 +383,7 @@ def _assert_incompatible_runtime_install_rejected(target: Path, label: str) -> N
     incompatible = _run_install("--target", target, "--mode", "copy")
     incompatible_output = incompatible.stdout + incompatible.stderr
     require(incompatible.returncode != 0, f"install.py は既存 incompatible runtime DB の通常 install を拒否してください: {label}")
-    for token in ("--backup", "--reset-runtime", "--clean-install"):
+    for token in ("--backup", "--reset-runtime", "--clean-install", "--backup --clean-install"):
         require(token in incompatible_output, f"install.py の既存 incompatible runtime DB 拒否 message は `{token}` を示してください: {label}")
     require(existing_database.exists(), f"install.py の拒否時は既存 runtime DB を削除しないでください: {label}")
     require(
@@ -331,7 +399,101 @@ def _assert_incompatible_runtime_install_rejected(target: Path, label: str) -> N
 
 
 def validate_install_upgrade_smoke() -> None:
+    _assert_release_documentation_contract()
     _assert_managed_block_helper_matrix()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        skill_root = Path(tmp)
+        standard_skill = skill_root / "standard.md"
+        standard_skill.write_text(
+            "---\nname: standard\ndescription: standard\nmetadata:\n  owner: agent-guild-orchestra\n  scope: target-repository-workflow\n---\n",
+            encoding="utf-8",
+        )
+        legacy_skill = skill_root / "legacy.md"
+        legacy_skill.write_text(
+            "---\nname: legacy\ndescription: legacy\nowner: agent-guild-orchestra\nscope: target-repository-workflow\n---\n",
+            encoding="utf-8",
+        )
+        canonical_third_party = skill_root / "canonical-third-party.md"
+        canonical_third_party.write_text(
+            "---\nname: canonical-third-party\ndescription: canonical owner wins\nowner: agent-guild-orchestra\nmetadata:\n  owner: third-party\n  scope: target-repository-workflow\n---\n",
+            encoding="utf-8",
+        )
+        canonical_orchestra = skill_root / "canonical-orchestra.md"
+        canonical_orchestra.write_text(
+            "---\nname: canonical-orchestra\ndescription: canonical owner wins\nowner: third-party\nmetadata:\n  owner: agent-guild-orchestra\n  scope: target-repository-workflow\n---\n",
+            encoding="utf-8",
+        )
+        invalid_utf8_skill = skill_root / "invalid-utf8.md"
+        invalid_utf8_skill.write_bytes(b"---\nmetadata:\n  owner: third-party\n---\n\xff\x00preserve\n")
+        original_yaml = INSTALLER.yaml
+        try:
+            for parser_name, parser in (("PyYAML", original_yaml), ("fallback", None)):
+                INSTALLER.yaml = parser
+                require(
+                    INSTALLER.read_skill_owner(standard_skill) == "agent-guild-orchestra",
+                    f"install.py の{parser_name} parserはmetadata.ownerを読めるようにしてください。",
+                )
+                require(
+                    INSTALLER.read_skill_owner(legacy_skill) == "agent-guild-orchestra",
+                    f"install.py の{parser_name} parserは旧top-level ownerを後方互換で読めるようにしてください。",
+                )
+                require(
+                    INSTALLER.read_skill_owner(canonical_third_party) == "third-party"
+                    and INSTALLER.read_skill_owner(canonical_orchestra) == "agent-guild-orchestra",
+                    f"install.py の{parser_name} parserはmetadata.ownerを旧top-level ownerより優先してください。",
+                )
+                require(
+                    INSTALLER.read_skill_owner(invalid_utf8_skill) is None,
+                    f"install.py の{parser_name} parserは非UTF-8 Skillのownerを不明として扱ってください。",
+                )
+
+                clean_target = (skill_root / f"clean-{parser_name.casefold()}").resolve()
+                keep_skill = clean_target / ".agents/skills/keep/SKILL.md"
+                remove_skill = clean_target / ".agents/skills/remove/SKILL.md"
+                keep_skill.parent.mkdir(parents=True)
+                remove_skill.parent.mkdir(parents=True)
+                keep_skill.write_text(canonical_third_party.read_text(encoding="utf-8"), encoding="utf-8")
+                remove_skill.write_text(canonical_orchestra.read_text(encoding="utf-8"), encoding="utf-8")
+                INSTALLER.clean_owner_scoped_skills(clean_target, dry_run=False)
+                require(keep_skill.exists(), f"install.py の{parser_name} clean-install cleanupはcanonical third-party Skillを保持してください。")
+                require(not remove_skill.exists(), f"install.py の{parser_name} clean-install cleanupはcanonical orchestra Skillを除去してください。")
+
+            for error_type in (PermissionError, OSError):
+                failed_clean_target = (skill_root / f"unreadable-{error_type.__name__}").resolve()
+                owned_skill = failed_clean_target / ".agents/skills/owned/SKILL.md"
+                owned_skill.parent.mkdir(parents=True)
+                owned_skill.write_text(
+                    "---\nname: owned\nmetadata:\n  owner: agent-guild-orchestra\n---\n",
+                    encoding="utf-8",
+                )
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output), patch.object(Path, "read_text", side_effect=error_type("synthetic owner read failure")):
+                    try:
+                        INSTALLER.clean_owner_scoped_skills(failed_clean_target, dry_run=False)
+                    except error_type:
+                        pass
+                    else:
+                        require(False, f"install.py は{error_type.__name__}をowner不明へ変換せず伝播してください。")
+                require(owned_skill.exists(), f"install.py は{error_type.__name__}時にowner Skillを削除しないでください。")
+                require("remove" not in output.getvalue(), f"install.py は{error_type.__name__}時に削除成功を出力しないでください。")
+        finally:
+            INSTALLER.yaml = original_yaml
+
+    original_yaml = INSTALLER.yaml
+    try:
+        INSTALLER.yaml = None
+        INSTALLER.validate_settings_release_contract(ROOT / "template")
+        fallback_root_model, fallback_pairs = INSTALLER.load_model_policy(ROOT / "template")
+    finally:
+        INSTALLER.yaml = original_yaml
+    require(fallback_root_model == "gpt-5.6-sol", "install.py のPyYAMLなしfallbackでもRoot model policyを読めるようにしてください。")
+    require(
+        fallback_pairs.get("adventurer") == ("gpt-5.6-terra", "high")
+        and all(fallback_pairs.get(role) == pair for role, pair in EXPECTED_UPDATED_AGENT_PAIRS.items())
+        and fallback_pairs.get("courier") == ("gpt-5.3-codex-spark", "xhigh"),
+        "install.py のPyYAMLなしfallbackでも固定subagent pairを保持してください。",
+    )
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "guild"
@@ -371,19 +533,34 @@ def validate_install_upgrade_smoke() -> None:
             target / ".agents/orchestra/queue/templates/adventurer_task.yaml",
             target / ".agents/orchestra/queue/templates/inquisitor_task.yaml",
             target / ".agents/skills" / ("meta" "cognitive-task-loop") / "SKILL.md",
+            target / ".agents/skills/explain-for-newcomers/SKILL.md",
         ]
         for path in legacy_paths:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("legacy: true\n", encoding="utf-8")
+        legacy_explanation_skill = target / ".agents/skills/explain-for-newcomers/SKILL.md"
+        legacy_explanation_skill.write_text(
+            "---\nname: explain-for-newcomers\ndescription: legacy explanation skill\nmetadata:\n  owner: agent-guild-orchestra\n  scope: response-explanation-workflow\n---\n",
+            encoding="utf-8",
+        )
+        third_party_skill = target / ".agents/skills/third-party-example/SKILL.md"
+        third_party_skill.parent.mkdir(parents=True, exist_ok=True)
+        third_party_skill.write_text(
+            "---\nname: third-party-example\ndescription: user-owned third-party skill\nmetadata:\n  owner: third-party\n  scope: example\n---\n",
+            encoding="utf-8",
+        )
 
         installed = _run_install("--target", target, "--mode", "copy")
         require(installed.returncode == 0, "install.py の通常 install smoke が失敗しました: " + installed.stderr)
-        _assert_installed_surface(target)
+        _assert_installed_surface(target, {"third-party-example"})
         _assert_agents_block_idempotent(target)
         _assert_git_exclude_block_idempotent(target)
+        runtime_candidate = target / ".orchestra/skill-candidates/demo/keep/SKILL.md"
+        runtime_candidate.parent.mkdir(parents=True)
+        runtime_candidate.write_text("candidate\n", encoding="utf-8")
 
         root_config_path = target / ".codex/config.toml"
-        for effort in ("high", "xhigh", "max", "medium"):
+        for effort in ("high", "xhigh", "ultra"):
             root_config = root_config_path.read_text(encoding="utf-8")
             root_config_path.write_text(
                 root_config.replace('model = "gpt-5.6-sol"', f'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "{effort}"', 1),
@@ -395,25 +572,27 @@ def validate_install_upgrade_smoke() -> None:
                 "model_reasoning_effort" not in INSTALLER.read_toml_document(root_config_path),
                 f"install.py の通常再installは既存Root {effort} effortをproject-local configから除去してください。",
             )
-        _assert_installed_surface(target)
+        _assert_installed_surface(target, {"third-party-example"})
         _assert_agents_block_idempotent(target)
         _assert_git_exclude_block_idempotent(target)
         remaining = [str(path.relative_to(target)) for path in legacy_paths if path.exists()]
         require(not remaining, "install.py は削除済み旧 template を prune してください: " + ", ".join(remaining))
+        require(third_party_skill.exists(), "install.py はunrelated third-party Skillを保持してください。")
+        require(runtime_candidate.read_text(encoding="utf-8") == "candidate\n", "install.py の通常再導入は runtime sibling candidate を保持してください。")
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "guild"
         existing_database = target / ".orchestra/queue/state.sqlite"
         existing_database.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(existing_database) as connection:
-            connection.execute("CREATE TABLE queue_metadata(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
-            connection.execute("INSERT INTO queue_metadata(key, value, updated_at) VALUES('schema_version', '2.0', 'legacy')")
+            connection.executescript((ROOT / "template/.agents/orchestra/scripts/queue_schema.sql").read_text(encoding="utf-8"))
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '3.0')")
             connection.commit()
 
-        _assert_incompatible_runtime_install_rejected(target, "schema_version=2.0")
+        _assert_incompatible_runtime_install_rejected(target, "旧schema_version=3.0")
         with sqlite3.connect(existing_database) as connection:
             schema_version = connection.execute("SELECT value FROM queue_metadata WHERE key = 'schema_version'").fetchone()
-        require(schema_version is not None and schema_version[0] == "2.0", "install.py の拒否時は既存 runtime DB を変更しないでください。")
+        require(schema_version is not None and schema_version[0] == "3.0", "install.py の拒否時は旧v3 runtime DB を変更しないでください。")
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "guild"
@@ -421,11 +600,11 @@ def validate_install_upgrade_smoke() -> None:
         existing_database.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(existing_database) as connection:
             connection.execute("CREATE TABLE queue_metadata(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)")
-            connection.execute("INSERT INTO queue_metadata(key, value, updated_at) VALUES('schema_version', '3.0', 'legacy')")
+            connection.execute("INSERT INTO queue_metadata(key, value, updated_at) VALUES('schema_version', '4.0', 'legacy')")
             connection.execute("CREATE TABLE assignments(task_id TEXT PRIMARY KEY, status TEXT)")
             connection.commit()
 
-        _assert_incompatible_runtime_install_rejected(target, "v3 physical schema mismatch")
+        _assert_incompatible_runtime_install_rejected(target, "v4 physical schema mismatch")
         with sqlite3.connect(existing_database) as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
             columns = {row[1] for row in connection.execute("PRAGMA table_info(assignments)")}
@@ -437,12 +616,12 @@ def validate_install_upgrade_smoke() -> None:
         existing_database.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(existing_database) as connection:
             connection.executescript((ROOT / "template/.agents/orchestra/scripts/queue_schema.sql").read_text(encoding="utf-8"))
-            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '3.0')")
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '4.0')")
             connection.execute("ALTER TABLE quests ADD COLUMN raw_log TEXT")
             connection.execute("CREATE TABLE unsafe_runtime_payload(secret TEXT)")
             connection.commit()
 
-        _assert_incompatible_runtime_install_rejected(target, "v3 unexpected physical schema")
+        _assert_incompatible_runtime_install_rejected(target, "v4 unexpected physical schema")
         with sqlite3.connect(existing_database) as connection:
             tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
             columns = {row[1] for row in connection.execute("PRAGMA table_info(quests)")}
@@ -452,18 +631,35 @@ def validate_install_upgrade_smoke() -> None:
         target = Path(tmp) / "guild"
         existing_database = target / ".orchestra/queue/state.sqlite"
         existing_database.parent.mkdir(parents=True, exist_ok=True)
+        canonical_schema = (ROOT / "template/.agents/orchestra/scripts/queue_schema.sql").read_text(encoding="utf-8")
+        type_drift_schema = canonical_schema.replace("  status TEXT NOT NULL,", "  status INTEGER,", 1)
+        require(type_drift_schema != canonical_schema, "runtime schema type drift fixtureを構築できません。")
+        with sqlite3.connect(existing_database) as connection:
+            connection.executescript(type_drift_schema)
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '4.0')")
+            connection.commit()
+
+        _assert_incompatible_runtime_install_rejected(target, "v4 column type/not-null drift")
+        with sqlite3.connect(existing_database) as connection:
+            quest_status = next(row for row in connection.execute("PRAGMA table_info(quests)") if row[1] == "status")
+        require(quest_status[2] == "INTEGER" and quest_status[3] == 0, "install.py の拒否時はtype/not-null drift DBを変更しないでください。")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "guild"
+        existing_database = target / ".orchestra/queue/state.sqlite"
+        existing_database.parent.mkdir(parents=True, exist_ok=True)
         old_runtime_value = "integration_owner"
         with sqlite3.connect(existing_database) as connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript((ROOT / "template/.agents/orchestra/scripts/queue_schema.sql").read_text(encoding="utf-8"))
-            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '3.0')")
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '4.0')")
             connection.execute(
                 "INSERT INTO quests(quest_id, workflow_id, rank, status, payload_json) VALUES(?, ?, ?, ?, ?)",
                 ("quest_legacy_value", "workflow_legacy_value", "solo_quest", "active", json.dumps({"control_decision": old_runtime_value})),
             )
             connection.commit()
 
-        _assert_incompatible_runtime_install_rejected(target, "v3 legacy runtime value")
+        _assert_incompatible_runtime_install_rejected(target, "v4 legacy runtime value")
         with sqlite3.connect(existing_database) as connection:
             payload = connection.execute("SELECT payload_json FROM quests WHERE quest_id = 'quest_legacy_value'").fetchone()
         require(payload is not None and json.loads(payload[0]).get("control_decision") == old_runtime_value, "install.py の拒否時は既存 runtime 値を変更しないでください。")
@@ -475,7 +671,37 @@ def validate_install_upgrade_smoke() -> None:
         existing_database = target / ".orchestra/queue/state.sqlite"
         existing_database.parent.mkdir(parents=True, exist_ok=True)
         existing_database.write_bytes(b"legacy runtime state")
+        stale_queue_file = target / ".orchestra/queue/stale.txt"
+        stale_queue_file.write_text("stale runtime state\n", encoding="utf-8")
         (target / ".orchestra/dashboard.md").write_text("legacy dashboard\n", encoding="utf-8")
+        clean_candidate = target / ".orchestra/skill-candidates/demo/keep/SKILL.md"
+        clean_candidate.parent.mkdir(parents=True)
+        clean_candidate.write_text("candidate\n", encoding="utf-8")
+        valid_external_skill = target / ".agents/skills/valid-external/SKILL.md"
+        valid_external_skill.parent.mkdir(parents=True)
+        valid_external_skill.write_text(
+            "---\nname: valid-external\nmetadata:\n  owner: third-party\n---\n",
+            encoding="utf-8",
+        )
+        invalid_utf8_external_skill = target / ".agents/skills/non-utf8-external/SKILL.md"
+        invalid_utf8_external_skill_bytes = b"---\nmetadata:\n  owner: third-party\n---\n\xff\x00preserve\n"
+        invalid_utf8_external_skill.parent.mkdir(parents=True)
+        invalid_utf8_external_skill.write_bytes(invalid_utf8_external_skill_bytes)
+        invalid_utf8_external_asset = target / ".agents/skills/non-utf8-external/resources/blob.bin"
+        invalid_utf8_external_asset_bytes = b"\x00\xffexternal-skill-asset\n"
+        invalid_utf8_external_asset.parent.mkdir()
+        invalid_utf8_external_asset.write_bytes(invalid_utf8_external_asset_bytes)
+        legacy_owned_skill = target / ".agents/skills/legacy-owned/SKILL.md"
+        legacy_owned_skill.parent.mkdir()
+        legacy_owned_skill.write_text(
+            "---\nname: legacy-owned\nowner: agent-guild-orchestra\n---\n",
+            encoding="utf-8",
+        )
+        unknown_runtime_file = target / ".orchestra/legacy-runtime.txt"
+        unknown_runtime_file.write_text("legacy\n", encoding="utf-8")
+        unknown_runtime_child = target / ".orchestra/unknown-runtime/cache.bin"
+        unknown_runtime_child.parent.mkdir()
+        unknown_runtime_child.write_bytes(b"legacy")
 
         clean_dry_run = _run_install("--target", target, "--mode", "copy", "--clean-install", "--dry-run")
         clean_dry_run_output = clean_dry_run.stdout + clean_dry_run.stderr
@@ -484,11 +710,47 @@ def validate_install_upgrade_smoke() -> None:
         require("init sqlite" in clean_dry_run_output and "state.sqlite" in clean_dry_run_output, "install.py --clean-install --dry-run は runtime DB 再初期化計画を表示してください。")
         require("既存状態を保持" not in clean_dry_run_output, "install.py --clean-install --dry-run は既存 runtime state を保持すると表示しないでください。")
 
-        clean_installed = _run_install("--target", target, "--mode", "copy", "--clean-install")
-        require(clean_installed.returncode == 0, "install.py --clean-install smoke が失敗しました: " + clean_installed.stderr)
-        _assert_installed_surface(target)
+        clean_without_backup = _run_install("--target", target, "--mode", "copy", "--clean-install")
+        clean_without_backup_output = clean_without_backup.stdout + clean_without_backup.stderr
+        require(clean_without_backup.returncode != 0, "install.py --clean-install は backup なしの非 dry-run を拒否してください。")
+        require("--backup" in clean_without_backup_output and "--allow-clean-install-without-backup" in clean_without_backup_output, "install.py --clean-install の拒否 message は backup と clean-install 専用 escape flag を示してください。")
+        require(stale_queue_file.exists() and legacy_owned_skill.exists(), "install.py --clean-install の拒否時は既存導入物を削除しないでください。")
+
+        clean_installed = _run_install("--target", target, "--mode", "copy", "--clean-install", "--backup")
+        clean_installed_output = clean_installed.stdout + clean_installed.stderr
+        require(clean_installed.returncode == 0, "install.py --clean-install --backup smoke が失敗しました: " + clean_installed.stderr)
+        require(
+            "Skill の所有者情報を UTF-8 として読めないため保持します: .agents/skills/non-utf8-external" in clean_installed_output,
+            "install.py --clean-install は非UTF-8 external Skillの保全理由だけを警告してください。",
+        )
+        require(
+            "preserve" not in clean_installed_output and "\x00" not in clean_installed_output,
+            "install.py --clean-install の非UTF-8 Skill警告は内容やraw bytesを出力しないでください。",
+        )
+        _assert_installed_surface(target, {"valid-external", "non-utf8-external"})
         _assert_agents_block_idempotent(target, expect_update_position=False)
         _assert_git_exclude_block_idempotent(target, expect_update_position=False)
+        require(clean_candidate.read_text(encoding="utf-8") == "candidate\n", "install.py --clean-install は runtime sibling candidate を保持してください。")
+        require(valid_external_skill.exists(), "install.py --clean-install はvalid external owner Skillを保持してください。")
+        require(
+            invalid_utf8_external_skill.read_bytes() == invalid_utf8_external_skill_bytes
+            and invalid_utf8_external_asset.read_bytes() == invalid_utf8_external_asset_bytes,
+            "install.py --clean-install は非UTF-8 external Skill directoryの全内容をbyte-for-byte保持してください。",
+        )
+        require(not legacy_owned_skill.exists(), "install.py --clean-install はvalid legacy orchestra owner Skillを除去してください。")
+        require(not unknown_runtime_file.exists() and not unknown_runtime_child.exists(), "install.py --clean-install は skill-candidates 以外の未知runtime siblingを除去してください。")
+        require(not stale_queue_file.exists(), "install.py --clean-install は既存queue内容を除去して初期化してください。")
+        require((target / ".orchestra/dashboard.md").read_bytes() == (ROOT / "template/.agents/orchestra/dashboard.md").read_bytes(), "install.py --clean-install はdashboardを初期状態へ戻してください。")
+        backups = sorted(path for path in (target / BACKUP_DIRECTORY).iterdir() if path.is_dir())
+        require(backups and any((backup / ".orchestra/queue/stale.txt").exists() for backup in backups), "install.py --clean-install --backup は削除前の runtime evidence を退避してください。")
+
+        opt_out_queue_file = target / ".orchestra/queue/opt-out-stale.txt"
+        opt_out_queue_file.write_text("opt-out runtime state\n", encoding="utf-8")
+        backup_count = len(backups)
+        clean_with_escape = _run_install("--target", target, "--mode", "copy", "--clean-install", "--allow-clean-install-without-backup")
+        require(clean_with_escape.returncode == 0, "install.py --clean-install --allow-clean-install-without-backup smoke が失敗しました: " + clean_with_escape.stderr)
+        require(not opt_out_queue_file.exists(), "install.py --clean-install の明示的 backup なし escape hatch は既存 runtime state を初期化してください。")
+        require(len([path for path in (target / BACKUP_DIRECTORY).iterdir() if path.is_dir()]) == backup_count, "install.py --clean-install の明示的 backup なし escape hatch は新規 backup を作成しないでください。")
 
     with tempfile.TemporaryDirectory() as tmp:
         target = Path(tmp) / "guild"
@@ -625,7 +887,7 @@ def validate_install_upgrade_smoke() -> None:
         sentinel.write_text("keep\n", encoding="utf-8")
         (target / ".agents").symlink_to(external, target_is_directory=True)
 
-        clean_parent_symlink = _run_install("--target", target, "--mode", "copy", "--clean-install")
+        clean_parent_symlink = _run_install("--target", target, "--mode", "copy", "--clean-install", "--allow-clean-install-without-backup")
         output = clean_parent_symlink.stdout + clean_parent_symlink.stderr
         require(clean_parent_symlink.returncode != 0 and "symlink" in output and ".agents" in output, "install.py --clean-install は symlink parent 経由の削除を拒否してください。")
         require(sentinel.read_text(encoding="utf-8") == "keep\n", "install.py --clean-install は symlink parent の外部 dir を削除しないでください。")
@@ -727,6 +989,36 @@ def validate_install_upgrade_smoke() -> None:
     pinned_root_effort = run_with_mutated_source("Root reasoning effort pinned", pin_root_reasoning_effort)
     require("reasoning effort" in (pinned_root_effort.stdout + pinned_root_effort.stderr), "install.py preflightはRootのproject-local effort指定を拒否してください。")
 
+    def downgrade_settings_version(source: Path) -> None:
+        path = source / ".agents/orchestra/config/settings.yaml"
+        path.write_text(path.read_text(encoding="utf-8").replace('version: "5.0"', 'version: "4.0"', 1), encoding="utf-8")
+
+    old_settings_contract = run_with_mutated_source("settings version 4.0", downgrade_settings_version)
+    require("settings.yaml.version" in (old_settings_contract.stdout + old_settings_contract.stderr) and "5.0" in (old_settings_contract.stdout + old_settings_contract.stderr), "install.py preflightは旧settings 4.0を拒否してください。")
+
+    def disable_root_control_plane_contract(source: Path) -> None:
+        path = source / ".agents/orchestra/config/settings.yaml"
+        path.write_text(path.read_text(encoding="utf-8").replace("  control_plane_only: true", "  control_plane_only: false", 1), encoding="utf-8")
+
+    stale_root_contract = run_with_mutated_source("Root direct work fallback", disable_root_control_plane_contract)
+    require("control-plane" in (stale_root_contract.stdout + stale_root_contract.stderr), "install.py preflightはcoordination-onlyでないRoot contractを拒否してください。")
+
+    def drift_settings_adventurer_pair(source: Path) -> None:
+        path = source / ".agents/orchestra/config/settings.yaml"
+        old = "    adventurer: {model: gpt-5.6-terra, model_reasoning_effort: high}"
+        new = "    adventurer: {model: gpt-5.6-sol, model_reasoning_effort: high}"
+        path.write_text(path.read_text(encoding="utf-8").replace(old, new, 1), encoding="utf-8")
+
+    stale_model_policy = run_with_mutated_source("settings adventurer pair drift", drift_settings_adventurer_pair)
+    require("adventurer" in (stale_model_policy.stdout + stale_model_policy.stderr) and "gpt-5.6-terra" in (stale_model_policy.stdout + stale_model_policy.stderr), "install.py preflightはsettings model pair driftを拒否してください。")
+
+    def drift_queue_schema_contract(source: Path) -> None:
+        path = source / ".agents/orchestra/scripts/queue_schema.sql"
+        path.write_text(path.read_text(encoding="utf-8").replace("  status TEXT NOT NULL,", "  status INTEGER,", 1), encoding="utf-8")
+
+    stale_queue_schema = run_with_mutated_source("queue schema type drift", drift_queue_schema_contract)
+    require("queue_schema.sql SHA-256" in (stale_queue_schema.stdout + stale_queue_schema.stderr), "install.py preflightはcanonical queue schema driftを拒否してください。")
+
     def enable_focus_recursive_agents(source: Path) -> None:
         path = source / ".codex/agents/examiner.toml"
         path.write_text(path.read_text(encoding="utf-8").replace("multi_agent = false", "multi_agent = true"), encoding="utf-8")
@@ -756,12 +1048,12 @@ def validate_install_upgrade_smoke() -> None:
         invalid_max_depth = run_with_mutated_source(f"max_depth {invalid_depth}", lambda source, depth=invalid_depth: set_max_depth(source, depth))
         require("max_depth=2" in (invalid_max_depth.stdout + invalid_max_depth.stderr), f"install.py は max_depth={invalid_depth} を拒否してください。")
 
-    def shorten_job_runtime(source: Path) -> None:
+    def restore_legacy_job_runtime(source: Path) -> None:
         path = source / ".codex/config.toml"
-        path.write_text(path.read_text(encoding="utf-8").replace("job_max_runtime_seconds = 1800", "job_max_runtime_seconds = 1200"), encoding="utf-8")
+        path.write_text(path.read_text(encoding="utf-8").replace("job_max_runtime_seconds = 2400", "job_max_runtime_seconds = 1800"), encoding="utf-8")
 
-    invalid_job_runtime = run_with_mutated_source("job runtime 1200", shorten_job_runtime)
-    require("job_max_runtime_seconds" in (invalid_job_runtime.stdout + invalid_job_runtime.stderr) and "1800" in (invalid_job_runtime.stdout + invalid_job_runtime.stderr), "install.py は1800秒以外のjob runtimeを拒否してください。")
+    invalid_job_runtime = run_with_mutated_source("legacy job runtime 1800", restore_legacy_job_runtime)
+    require("job_max_runtime_seconds" in (invalid_job_runtime.stdout + invalid_job_runtime.stderr) and "2400" in (invalid_job_runtime.stdout + invalid_job_runtime.stderr), "install.py は2400秒以外のjob runtimeを拒否してください。")
 
     def set_adventurer_parallelism(source: Path, value: int) -> None:
         path = source / ".agents/orchestra/config/settings.yaml"
@@ -846,6 +1138,59 @@ def validate_install_upgrade_smoke() -> None:
 
     missing_quest_awareness_skill = run_with_mutated_source("missing quest-awareness-loop skill", lambda source: shutil.rmtree(source / ".agents/skills/quest-awareness-loop"))
     require("quest-awareness-loop" in (missing_quest_awareness_skill.stdout + missing_quest_awareness_skill.stderr), "install.py の quest-awareness-loop 不足拒否 message は skill 名を示してください。")
+
+    def add_empty_unexpected_skill_directory(source: Path) -> None:
+        (source / ".agents/skills/empty-skill/agents").mkdir(parents=True)
+
+    run_with_allowed_mutated_source("empty unexpected Skill directory", add_empty_unexpected_skill_directory)
+
+    def add_unexpected_skill_file(source: Path) -> None:
+        path = source / ".agents/skills/unexpected-skill/README.md"
+        path.parent.mkdir()
+        path.write_text("material\n", encoding="utf-8")
+
+    unexpected_skill_file = run_with_mutated_source("通常fileを含む未知Skill directory", add_unexpected_skill_file)
+    require(
+        "unexpected: unexpected-skill" in (unexpected_skill_file.stdout + unexpected_skill_file.stderr),
+        "install.py は file を含む unexpected Skill directory を明示的に拒否してください。",
+    )
+
+    def add_unexpected_skill_manifest(source: Path) -> None:
+        path = source / ".agents/skills/unexpected-manifest/SKILL.md"
+        path.parent.mkdir()
+        path.write_text("---\nname: unexpected-manifest\n---\n", encoding="utf-8")
+
+    unexpected_skill_manifest = run_with_mutated_source("SKILL.mdを含む未知Skill directory", add_unexpected_skill_manifest)
+    require(
+        "unexpected: unexpected-manifest" in (unexpected_skill_manifest.stdout + unexpected_skill_manifest.stderr),
+        "install.py は SKILL.md を含む unexpected Skill directory を明示的に拒否してください。",
+    )
+
+    def add_unexpected_skill_symlink(source: Path) -> None:
+        path = source / ".agents/skills/unexpected-symlink/linked-config.toml"
+        path.parent.mkdir()
+        path.symlink_to(source / ".codex/config.toml")
+
+    unexpected_skill_symlink = run_with_mutated_source("symlinkを含む未知Skill directory", add_unexpected_skill_symlink)
+    require(
+        "symlink" in (unexpected_skill_symlink.stdout + unexpected_skill_symlink.stderr),
+        "install.py は symlink を含む unexpected Skill directory を拒否してください。",
+    )
+
+    missing_skill_openai = run_with_mutated_source(
+        "missing skill openai metadata",
+        lambda source: (source / ".agents/skills/use-guild-workflow/agents/openai.yaml").unlink(),
+    )
+    require("openai.yaml" in (missing_skill_openai.stdout + missing_skill_openai.stderr), "install.py の Skill openai metadata 不足拒否 message は openai.yaml を示してください。")
+
+    missing_vscode_helper = run_with_mutated_source(
+        "missing VS Code launch helper",
+        lambda source: (source / VSCODE_HELPER_REL).unlink(),
+    )
+    require(
+        "open_repositories_in_vscode.py" in (missing_vscode_helper.stdout + missing_vscode_helper.stderr),
+        "install.py の VS Code launch helper 不足拒否 message は helper file を示してください。",
+    )
 
     missing_runtime_doc = run_with_mutated_source("missing runtime memory doc", lambda source: (source / ".agents/orchestra/docs/agent-memory.md").unlink())
     require("agent-memory.md" in (missing_runtime_doc.stdout + missing_runtime_doc.stderr), "install.py の runtime docs 不足拒否 message は agent-memory.md を示してください。")

@@ -23,7 +23,7 @@ exclude = [
 max_threads = 64
 # Root(depth 0)→Inquisitor(depth 1)→Examiner(depth 2)だけを許可する。
 max_depth = 2
-job_max_runtime_seconds = 1800
+job_max_runtime_seconds = 2400
 
 [features]
 codex_hooks = true

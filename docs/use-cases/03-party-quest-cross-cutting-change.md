@@ -28,7 +28,7 @@ target_repo_root は /path/to/guild-root/repositories/example-app です。
 party_tactics:
 - 実装担当は既存設計を読んで最小差分で進める
 - assignment ごとに assignment_id、owned scope、編集禁止 path、validation expectation を持たせる
-- captainがSol/highの`artificer`用assignmentとintegration barrierを設計する
+- captainがdeploymentで固定された`artificer`用assignmentとintegration barrierを設計する
 - Trial は validation、UI 回帰、既存データ影響を focus にする
 - 必要なら read-only sage を 1 focus だけ使う
 

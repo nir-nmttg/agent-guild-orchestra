@@ -1,8 +1,9 @@
 ---
 name: repository-design-mapmaking
 description: "repositories/ 配下の対象リポジトリについて、設計、実装計画、方針整理、アーキテクチャ検討、技術方針、調査だけ、計画だけ、mapmaking を求められた時に、Root が read-only `cartographer` を呼び出して地図、危険地帯、推奨 Quest Rank、Party Tactics、Trial 方針を整理させるために使います。"
-owner: agent-guild-orchestra
-scope: target-repository-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: target-repository-workflow
 ---
 
 # repository-design-mapmaking

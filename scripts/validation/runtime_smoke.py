@@ -123,6 +123,23 @@ def validate_queue_db_smoke() -> None:
     result = _run_python(script, "--help")
     require(result.returncode == 0, "queue_db.py --help が失敗しました: " + result.stderr)
 
+    with tempfile.TemporaryDirectory() as tmp:
+        copied_scripts = Path(tmp) / "scripts"
+        copied_scripts.mkdir()
+        copied_queue_db = copied_scripts / "queue_db.py"
+        copied_schema = copied_scripts / "queue_schema.sql"
+        copied_queue_db.write_bytes(script.read_bytes())
+        canonical_schema = (script.parent / "queue_schema.sql").read_text(encoding="utf-8")
+        copied_schema.write_text(canonical_schema.replace("  status TEXT NOT NULL,", "  status INTEGER,", 1), encoding="utf-8")
+        untouched_runtime = Path(tmp) / ".orchestra"
+        tampered_source_init = _run_python(copied_queue_db, "--runtime-root", untouched_runtime, "init")
+        tampered_source_output = tampered_source_init.stdout + tampered_source_init.stderr
+        require(
+            tampered_source_init.returncode != 0 and "queue_schema.sql SHA-256" in tampered_source_output,
+            "queue_db.py init はdriftしたschema sourceをDB open前に拒否してください。",
+        )
+        require(not (untouched_runtime / "queue/state.sqlite").exists(), "queue_db.py はdriftしたschema sourceを実行してDBを作成しないでください。")
+
     text = read("template/.agents/orchestra/scripts/queue_db.py")
     require_tokens(
         text,
@@ -1182,18 +1199,124 @@ def validate_queue_db_smoke() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         runtime_root = Path(tmp) / ".orchestra"
+        database = runtime_root / "queue" / "state.sqlite"
+        database.parent.mkdir(parents=True)
+        with sqlite3.connect(database) as connection:
+            connection.executescript(read("template/.agents/orchestra/scripts/queue_schema.sql"))
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '3.0')")
+            connection.commit()
+
+        old_version_init = _run_python(script, "--runtime-root", runtime_root, "init")
+        old_version_init_output = old_version_init.stdout + old_version_init.stderr
+        require(
+            old_version_init.returncode != 0 and "schema_version" in old_version_init_output and "4.0" in old_version_init_output,
+            "queue_db.py init は物理schemaが一致しても旧v3 metadataを拒否してください。",
+        )
+        old_version_dump = _run_python(script, "--runtime-root", runtime_root, "dump", "quests")
+        old_version_dump_output = old_version_dump.stdout + old_version_dump.stderr
+        require(
+            old_version_dump.returncode != 0 and "schema_version" in old_version_dump_output,
+            "queue_db.py dump は旧v3 metadataを拒否してください。",
+        )
+        old_version_write = _run_python(script, "--runtime-root", runtime_root, "record-event", json.dumps(_valid_event()))
+        old_version_write_output = old_version_write.stdout + old_version_write.stderr
+        require(
+            old_version_write.returncode != 0 and "schema_version" in old_version_write_output,
+            "queue_db.py record-event は旧v3 metadataを拒否してください。",
+        )
+        require(
+            not any(database.with_name(database.name + suffix).exists() for suffix in ("-wal", "-shm")),
+            "queue_db.py は旧v3 metadata DBをwrite openする前に拒否してください。",
+        )
+        with sqlite3.connect(database) as connection:
+            schema_version = connection.execute("SELECT value FROM queue_metadata WHERE key = 'schema_version'").fetchone()
+            event_count = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        require(schema_version is not None and schema_version[0] == "3.0", "queue_db.py は拒否した旧v3 metadataを変更しないでください。")
+        require(event_count == 0, "queue_db.py は旧v3 metadata DBへeventを書き込まないでください。")
+        old_version_audit = _run_python(audit_script, "--runtime-root", runtime_root, "--static-root", ROOT / "template/.agents/orchestra", "--json")
+        old_version_audit_output = old_version_audit.stdout + old_version_audit.stderr
+        require(
+            old_version_audit.returncode != 0 and "schema_version" in old_version_audit_output and "4.0" in old_version_audit_output and "3.0" in old_version_audit_output,
+            "queue_audit.py は旧v3 metadataを拒否してください。",
+        )
+        with sqlite3.connect(database) as connection:
+            connection.execute("DELETE FROM queue_metadata WHERE key = 'schema_version'")
+            connection.commit()
+        missing_version_init = _run_python(script, "--runtime-root", runtime_root, "init")
+        missing_version_init_output = missing_version_init.stdout + missing_version_init.stderr
+        require(
+            missing_version_init.returncode != 0 and "schema_version" in missing_version_init_output,
+            "queue_db.py init はmetadata欠落DBを暗黙初期化せず拒否してください。",
+        )
+        with sqlite3.connect(database) as connection:
+            schema_version = connection.execute("SELECT value FROM queue_metadata WHERE key = 'schema_version'").fetchone()
+        require(schema_version is None, "queue_db.py は拒否したmetadata欠落DBへschema_versionを挿入しないでください。")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        runtime_root = Path(tmp) / ".orchestra"
+        database = runtime_root / "queue" / "state.sqlite"
+        database.parent.mkdir(parents=True)
+        canonical_schema = read("template/.agents/orchestra/scripts/queue_schema.sql")
+        type_drift_schema = canonical_schema.replace("  status TEXT NOT NULL,", "  status INTEGER,", 1)
+        require(type_drift_schema != canonical_schema, "queue schema type drift fixtureを構築できません。")
+        with sqlite3.connect(database) as connection:
+            connection.executescript(type_drift_schema)
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '4.0')")
+            connection.commit()
+
+        type_drift_init = _run_python(script, "--runtime-root", runtime_root, "init")
+        type_drift_output = type_drift_init.stdout + type_drift_init.stderr
+        require(
+            type_drift_init.returncode != 0 and "signature" in type_drift_output and "quests" in type_drift_output,
+            "queue_db.py init は同名columnのtype/not-null driftを拒否してください。",
+        )
+        type_drift_audit = _run_python(audit_script, "--runtime-root", runtime_root, "--static-root", ROOT / "template/.agents/orchestra", "--json")
+        type_drift_audit_output = type_drift_audit.stdout + type_drift_audit.stderr
+        require(
+            type_drift_audit.returncode != 0 and "signature" in type_drift_audit_output and "quests" in type_drift_audit_output,
+            "queue_audit.py は同名columnのtype/not-null driftを拒否してください。",
+        )
+        with sqlite3.connect(database) as connection:
+            quest_status = next(row for row in connection.execute("PRAGMA table_info(quests)") if row[1] == "status")
+        require(quest_status[2] == "INTEGER" and quest_status[3] == 0, "schema drift拒否時にDB定義を変更しないでください。")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        runtime_root = Path(tmp) / ".orchestra"
+        database = runtime_root / "queue" / "state.sqlite"
+        database.parent.mkdir(parents=True)
+        with sqlite3.connect(database) as connection:
+            connection.executescript(read("template/.agents/orchestra/scripts/queue_schema.sql"))
+            connection.execute("INSERT INTO queue_metadata(key, value) VALUES('schema_version', '4.0')")
+            connection.execute("DROP INDEX idx_events_entity")
+            connection.commit()
+
+        index_drift_dump = _run_python(script, "--runtime-root", runtime_root, "dump", "events")
+        index_drift_output = index_drift_dump.stdout + index_drift_dump.stderr
+        require(
+            index_drift_dump.returncode != 0 and "signature" in index_drift_output and "idx_events_entity" in index_drift_output,
+            "queue_db.py read path はcanonical index欠落を拒否してください。",
+        )
+        index_drift_audit = _run_python(audit_script, "--runtime-root", runtime_root, "--static-root", ROOT / "template/.agents/orchestra", "--json")
+        index_drift_audit_output = index_drift_audit.stdout + index_drift_audit.stderr
+        require(
+            index_drift_audit.returncode != 0 and "signature" in index_drift_audit_output and "idx_events_entity" in index_drift_audit_output,
+            "queue_audit.py はcanonical index欠落を拒否してください。",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        runtime_root = Path(tmp) / ".orchestra"
         init = _run_python(script, "--runtime-root", runtime_root, "init")
         require(init.returncode == 0, "queue_db.py init の未知 schema smoke 準備が失敗しました: " + init.stderr)
         database = runtime_root / "queue" / "state.sqlite"
-        for suffix in ("-wal", "-shm"):
-            sidecar = database.with_name(database.name + suffix)
-            if sidecar.exists():
-                sidecar.unlink()
         with sqlite3.connect(database) as connection:
             connection.execute("PRAGMA journal_mode=DELETE")
             connection.execute("ALTER TABLE quests ADD COLUMN raw_log TEXT")
             connection.execute("CREATE TABLE unsafe_runtime_payload(secret TEXT)")
             connection.commit()
+        for suffix in ("-wal", "-shm"):
+            sidecar = database.with_name(database.name + suffix)
+            if sidecar.exists():
+                sidecar.unlink()
 
         unexpected_init = _run_python(script, "--runtime-root", runtime_root, "init")
         unexpected_init_output = unexpected_init.stdout + unexpected_init.stderr

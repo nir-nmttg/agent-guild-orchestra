@@ -25,6 +25,7 @@ EXPECTED_FIXTURES = {
     "ledger_injection_negative.yaml",
     "mapmaking_readonly_no_edit.yaml",
     "party_integration_barrier_stable_revision.yaml",
+    "root_coordination_only.yaml",
     "safety_approval_scope_absolute_deny.yaml",
     "safety_gate_needs_human.yaml",
     "warden_evidence_trigger.yaml",
@@ -61,11 +62,124 @@ def _forbidden(value: object, label: str) -> set[str]:
     return set(forbidden)
 
 
+_CANONICAL_SNAPSHOT_FIELDS = {
+    "digest_version",
+    "kind",
+    "revision_id",
+    "base_ref",
+    "head_ref",
+    "diff_hash",
+    "dirty_state",
+    "scope_paths",
+    "untracked_paths",
+    "snapshot_id",
+}
+
+
+def _canonical_snapshot(value: object, label: str, *, postwrite: bool = False) -> dict[str, object]:
+    snapshot = mapping(value, label)
+    require(set(snapshot) == _CANONICAL_SNAPSHOT_FIELDS, f"{label} はhelper canonical snapshot fieldsだけを持つ必要があります。")
+    require(snapshot.get("digest_version") == "agent-guild-orchestra-snapshot-v1", f"{label}.digest_version が不正です。")
+    require(snapshot.get("kind") == "working_tree_content", f"{label}.kind が不正です。")
+    require(isinstance(snapshot.get("revision_id"), str) and isinstance(snapshot.get("base_ref"), str), f"{label} はrevision/baseを持つ必要があります。")
+    require(snapshot.get("head_ref") is None, f"{label}.head_ref はworking tree snapshotではnullにしてください。")
+    require(snapshot.get("dirty_state") in {"clean", "dirty"}, f"{label}.dirty_state が不正です。")
+    require(snapshot.get("snapshot_id") == snapshot.get("diff_hash"), f"{label}.snapshot_id はworking tree diff_hashと一致してください。")
+    sequence(snapshot.get("scope_paths"), f"{label}.scope_paths")
+    untracked_paths = sequence(snapshot.get("untracked_paths"), f"{label}.untracked_paths")
+    if not postwrite:
+        require(untracked_paths == [], f"{label}.untracked_paths はassignmentで明示した空listにしてください。")
+    return snapshot
+
+
 def validate_golden_quests() -> None:
     root = ROOT / GOLDEN_ROOT
     require(root.exists(), "golden Quest fixture directory が必要です。")
     actual = {path.name for path in root.glob("*.yaml")}
     require(actual == EXPECTED_FIXTURES, "golden Quest fixture 一覧が期待値と一致しません: " + ", ".join(sorted(actual)))
+
+    # Root is a control-plane judge. Target-repository work always returns through a worker report.
+    root_coordination = _expected("root_coordination_only.yaml")
+    require(root_coordination.get("root_model") == "gpt-5.6-sol", "Root model は gpt-5.6-sol に固定してください。")
+    root_effort = mapping(root_coordination.get("root_reasoning_effort"), "root_coordination.root_reasoning_effort")
+    require(root_effort.get("project_local_pin") is False, "Root effortをproject-localに固定しないでください。")
+    require(
+        set(sequence(root_effort.get("user_selectable_modes"), "root_coordination.root_reasoning_effort.user_selectable_modes"))
+        == {"high", "xhigh", "ultra"},
+        "Root effort mode は high / xhigh / ultra にしてください。",
+    )
+    control_plane = mapping(root_coordination.get("control_plane"), "root_coordination.control_plane")
+    require(control_plane.get("control_plane_only") is True, "Rootをcontrol-plane onlyにしてください。")
+    require(
+        set(sequence(control_plane.get("allowed_observations"), "root_coordination.control_plane.allowed_observations"))
+        == {"target_repo_identity", "git_status", "snapshot_helper", "queue_state", "browser_observation_facts"},
+        "Rootの直接観測はcontrol-plane状態だけにしてください。",
+    )
+    delegated_work = {
+        "repository_exploration",
+        "implementation",
+        "validation_execution",
+        "browser_planning",
+        "browser_allowed_operation_specification",
+        "browser_evidence_interpretation",
+        "debugging",
+        "review_evidence_generation",
+    }
+    require(
+        set(sequence(control_plane.get("delegated_work"), "root_coordination.control_plane.delegated_work")) == delegated_work,
+        "対象repositoryの作業はworkerへ委譲してください。",
+    )
+    require(
+        {"repository_exploration", "implementation", "validation_execution", "browser_execution", "debugging", "review_evidence_generation", "trial_acceptance", "ledger_write"}
+        == _forbidden(control_plane.get("forbidden_root_work"), "root_coordination.control_plane.forbidden_root_work"),
+        "Rootの直接作業禁止集合が不正です。",
+    )
+    require(control_plane.get("report_required_before_next_action") is True, "Rootはworker report前に次actionへ進まないでください。")
+    require(control_plane.get("worker_unavailable_outcome") == "needs_human", "worker不在時はRoot直接fallbackでなくneeds_humanにしてください。")
+    browser_exception = mapping(control_plane.get("browser_control_tool_exception"), "root_coordination.control_plane.browser_control_tool_exception")
+    require(
+        browser_exception
+        == {
+            "root_executes_only": True,
+            "subagent_tool_calls": False,
+            "required_handoff": ["objective", "url", "authority", "allowed_operations"],
+            "root_records": "browser_observation_facts",
+        },
+        "browser-control toolはRoot限定の仕様実行・観測記録例外にしてください。",
+    )
+    routing = mapping(root_coordination.get("routing_cases"), "root_coordination.routing_cases")
+    require(
+        mapping(routing.get("repository_read_only"), "root_coordination.routing_cases.repository_read_only")
+        == {"worker_id": "cartographer", "root_executes": False, "report_required": True},
+        "read-only repository調査はcartographerへ委譲してください。",
+    )
+    require(
+        mapping(routing.get("bounded_mutation"), "root_coordination.routing_cases.bounded_mutation")
+        == {"worker_id": "adventurer", "root_executes": False, "report_required": True},
+        "bounded mutationはadventurerへ委譲してください。",
+    )
+    require(
+        mapping(routing.get("browser_readonly"), "root_coordination.routing_cases.browser_readonly")
+        == {"worker_id": "cartographer", "root_executes_browser_control_tool": True, "report_required": True},
+        "browser read-onlyはcartographerの仕様とRoot限定tool実行を分離してください。",
+    )
+    require(
+        mapping(routing.get("worker_unavailable"), "root_coordination.routing_cases.worker_unavailable")
+        == {"outcome": "needs_human", "root_direct_fallback": False},
+        "worker不在時にRootが対象repository作業を代行しないでください。",
+    )
+    ultra = mapping(root_coordination.get("ultra_mode"), "root_coordination.ultra_mode")
+    require(
+        ultra
+        == {
+            "proactive_delegation": True,
+            "authority_unchanged": True,
+            "role_topology_unchanged": True,
+            "subagent_pair_overrides_allowed": False,
+            "report_gate_unchanged": True,
+        },
+        "Ultraは委譲の積極性だけを変え、authority/topology/fixed pair/report gateを変えないでください。",
+    )
 
     # Read-only mapmaking stays safe without forcing a ceremonial sage pass.
     mapmaking = _expected("mapmaking_readonly_no_edit.yaml")
@@ -247,13 +361,58 @@ def validate_golden_quests() -> None:
     courier = mapping(courier_doc.get("expected"), "courier.expected")
     require(_authority(courier.get("authority"), "courier.authority") == {"read": True, "edit": False, "validate": False, "local_git": True, "external_actions": False}, "courier authority が不正です。")
     auth = mapping(courier.get("authorization"), "courier.authorization")
-    require(auth.get("source") == "explicit_human_skill_invocation" and auth.get("skill_name") == "git-split-commits-from-diff", "courier Git authority は人間が明示指定したコマンド実行系Skillに固定してください。")
-    require(auth.get("target_repo_root") == courier_input.get("target_repo_root"), "courier Git authority の target_repo_root は人間入力に固定してください。")
-    require(auth.get("allowed_paths") == courier_input.get("allowed_paths"), "courier Git authority の allowed_paths は人間入力に固定してください。")
-    require(auth.get("allowed_operations") == ["stage", "commit"] and auth.get("accepted_revision_id") == courier_input.get("accepted_revision_id") and auth.get("accepted_diff_hash") == courier_input.get("accepted_diff_hash"), "Skill指定のGit authorityはSkill定義操作とaccepted snapshotに固定してください。")
-    require(auth.get("implicit_request_allowed") is False, "暗黙の Git request を許可しないでください。")
-    require(auth.get("skill_defined_scope_only") is True and auth.get("safety_gates_bypassed") is False, "Skill指定でscope拡張や安全gate迂回を許可しないでください。")
-    _forbidden(courier.get("forbidden"), "courier.forbidden")
+    require(auth.get("source") == "root_scoped_courier_assignment" and auth.get("skill_name") == "git-split-commits-from-diff", "courier Git authority はRootの境界固定assignmentと既存Git Skillに固定してください。")
+    require(auth.get("local_git_write_owner") == "courier" and auth.get("command_verbatim_repetition_required") is False, "courierだけをlocal Git write ownerとし、コマンド逐語反復を要求しないでください。")
+    require(auth.get("target_repo_root") == courier_input.get("target_repo_root"), "courier Git authority の target_repo_root はRoot assignmentに固定してください。")
+    path_scope = mapping(auth.get("path_or_ref_scope"), "courier.authorization.path_or_ref_scope")
+    require(path_scope.get("paths") == courier_input.get("allowed_paths"), "courier Git authority のpath scopeはassignmentに固定してください。")
+    input_snapshot = _canonical_snapshot(courier_input.get("subject_snapshot"), "courier.input.subject_snapshot")
+    snapshot = _canonical_snapshot(auth.get("subject_snapshot"), "courier.authorization.subject_snapshot")
+    require(snapshot == input_snapshot, "courier Git authorityのcanonical snapshotはinput assignmentと完全一致してください。")
+    closed_allowlist = {"branch_create_and_switch_new", "rename_origin_unpushed_branch", "stage_exact_paths_or_hunks", "unstage_index_only_exact_paths", "commit_non_amend"}
+    require(set(sequence(auth.get("allowed_operations"), "courier.authorization.allowed_operations")) <= closed_allowlist and auth.get("allowed_operations") == ["stage_exact_paths_or_hunks", "commit_non_amend"], "courier Git authorityはclosedな可逆allowlistのassignment操作に限定してください。")
+    require(sequence(auth.get("required_assignment_fields"), "courier.authorization.required_assignment_fields") == ["target_repo_root", "allowed_operations", "path_or_ref_scope", "subject_snapshot", "preconditions", "postconditions", "forbidden_operations"], "courier assignmentの必須境界が不足しています。")
+    require(auth.get("outside_allowlist") == "not_generally_authorized" and auth.get("closed_operation_allowlist") is True and auth.get("safety_gates_bypassed") is False, "allowlist外の一般許可や安全gate迂回を許可しないでください。")
+    preconditions = mapping(courier.get("preconditions"), "courier.preconditions")
+    required_preconditions = {"target_repo_root_confirmed", "branch_confirmed", "git_status_inspected", "staged_diff_inspected", "unrelated_changes_excluded", "snapshot_helper_reissued_same_kind_base_scope", "preflight_snapshot_matches_assignment"}
+    require(
+        set(preconditions) == required_preconditions and all(value is True for value in preconditions.values()),
+        "courierは最初のGit write直前に同一kind/base/scopeのhelper snapshot完全一致を確認してください。",
+    )
+    preflight_snapshot = _canonical_snapshot(courier.get("preflight_snapshot"), "courier.preflight_snapshot")
+    require(preflight_snapshot == input_snapshot, "courier preflight canonical snapshotはinput/authorization snapshotと完全一致してください。")
+    postconditions = mapping(courier.get("postconditions"), "courier.postconditions")
+    required_postconditions = {"git_status_checked", "commit_hash_recorded", "committed_paths_match_scope", "remaining_changes_reported", "branch_recorded", "upstream_validation_result_recorded", "ledger_event_disposition_recorded", "committed_diff_matches_accepted_hash", "external_state_unchanged", "postwrite_untracked_from_postwrite_state"}
+    require(set(postconditions) == required_postconditions and all(value is True for value in postconditions.values()), "courier postconditionはclosedな必須集合で、critical booleanをすべてtrueにしてください。")
+    postwrite_snapshot = _canonical_snapshot(courier.get("postwrite_snapshot"), "courier.postwrite_snapshot", postwrite=True)
+    require(postwrite_snapshot.get("scope_paths") == input_snapshot.get("scope_paths") and postwrite_snapshot.get("base_ref") == postwrite_snapshot.get("revision_id"), "post-write snapshotはworking_tree_content kindで、scopeを保持しpost-write revision/base lineageを満たしてください。")
+    destructive = mapping(courier.get("destructive_operations"), "courier.destructive_operations")
+    require(
+        set(sequence(destructive.get("requires_immediate_human_confirmation"), "courier.destructive_operations.requires_immediate_human_confirmation"))
+        == {"reset_head_move", "reset_hard", "worktree_reverting_checkout_or_restore", "clean", "commit_amend", "rebase_or_filter", "ref_branch_tag_delete_or_force_move", "reflog_prune_or_recovery_difficult_gc", "destructive_stash", "forced_or_discarding_branch_switch"}
+        and sequence(destructive.get("authorized_in_this_assignment"), "courier.destructive_operations.authorized_in_this_assignment") == [],
+        "後戻り困難なGit操作は実行直前の人間確認なしにassignmentで許可しないでください。",
+    )
+    require({"push", "pull_request", "destructive_git", "unrelated_stage", "root_or_other_role_local_git_write", "general_branch_switch", "broad_stage_pathspec"} <= _forbidden(courier.get("forbidden"), "courier.forbidden"), "courier forbidden setが不足しています。")
+    negative = mapping(courier.get("negative_cases"), "courier.negative_cases")
+    stale = mapping(negative.get("stale_snapshot"), "courier.negative_cases.stale_snapshot")
+    require(mapping(stale.get("preflight"), "courier.negative_cases.stale_snapshot.preflight") == {"same_kind_base_scope": True, "snapshot_matches_assignment": False} and stale.get("outcome") == "stale_evidence" and stale.get("git_write_executed") is False, "stale snapshotはGit write前に停止してください。")
+    wrong_owner = mapping(negative.get("wrong_owner"), "courier.negative_cases.wrong_owner")
+    require(wrong_owner == {"assignment_owner": "adventurer", "outcome": "reject_wrong_owner", "git_write_executed": False}, "courier以外のGit write ownerを拒否してください。")
+    outside = mapping(negative.get("outside_allowlist_operation"), "courier.negative_cases.outside_allowlist_operation")
+    require(outside == {"requested_operation": "merge", "outcome": "reject_outside_allowlist", "git_write_executed": False}, "allowlist外operationを拒否してください。")
+    destructive_switch = mapping(negative.get("destructive_switch_without_reconfirmation"), "courier.negative_cases.destructive_switch_without_reconfirmation")
+    require(destructive_switch == {"requested_command": "git switch --discard-changes existing-branch", "immediate_human_confirmation": False, "outcome": "needs_human", "git_write_executed": False}, "破壊的switchには直前人間確認が必要です。")
+    external = mapping(negative.get("external_update_without_reconfirmation"), "courier.negative_cases.external_update_without_reconfirmation")
+    require(external == {"requested_operation": "push", "immediate_human_reconfirmation": False, "outcome": "needs_human", "external_action_executed": False}, "外部更新には直前再確認が必要です。")
+    canonical_mismatch = mapping(negative.get("canonical_snapshot_mismatch"), "courier.negative_cases.canonical_snapshot_mismatch")
+    require(canonical_mismatch.get("input_snapshot_id") == input_snapshot.get("snapshot_id") and canonical_mismatch.get("authorization_snapshot_id") != input_snapshot.get("snapshot_id") and canonical_mismatch.get("outcome") == "stale_evidence" and canonical_mismatch.get("git_write_executed") is False, "canonical snapshot mismatchはstale_evidenceとしてGit write前に拒否してください。")
+    target_not_confirmed = mapping(negative.get("target_repo_not_confirmed"), "courier.negative_cases.target_repo_not_confirmed")
+    require(target_not_confirmed == {"target_repo_root_confirmed": False, "outcome": "reject_preconditions", "git_write_executed": False}, "target_repo_root_confirmed=falseを拒否してください。")
+    paths_mismatch = mapping(negative.get("committed_paths_scope_mismatch"), "courier.negative_cases.committed_paths_scope_mismatch")
+    require(paths_mismatch == {"committed_paths_match_scope": False, "outcome": "reject_postconditions", "git_write_executed": False}, "committed_paths_match_scope=falseを拒否してください。")
+    external_changed = mapping(negative.get("external_state_changed"), "courier.negative_cases.external_state_changed")
+    require(external_changed == {"external_state_unchanged": False, "outcome": "reject_postconditions", "git_write_executed": False}, "external_state_unchanged=falseを拒否してください。")
 
     ledger = _expected("ledger_injection_negative.yaml")
     require(ledger.get("outcome") == "reject_untrusted_instruction", "Ledger instruction injection を拒否してください。")

@@ -4,7 +4,16 @@
 
 ## [Unreleased]
 
-現在、記録対象の変更はありません。
+### Breaking changes
+
+- RootをSol固定のcoordination / judge専任とし、対象repoの探索、コード読解、実装、test、browserの計画/解釈、debug、review evidence収集をnamed subagentへ必ず委譲。browser-control toolだけはrole仕様どおりRootが実行して観測事実を記録
+- Rootのreasoning effortをproject-localへ固定せず、利用者選択の`high`、`xhigh`、`ultra`を同じnamed-role topologyでサポート
+- deployment pairを役割のauthorityとblast radiusに合わせて再編し、`adventurer`と`examiner`をTerra/high、`sage`をLuna/xhigh、`inquisitor`をSol/xhighへ変更。CourierはSpark/xhighを維持
+- xhigh roleのjob timeoutに必要な余裕を確保するため、`job_max_runtime_seconds`を1800秒から2400秒へ延長
+- runtime settingsを5.0、SQLite runtime schemaを4.0へ更新。canonical schemaのSHA-256と型・制約・indexを含む物理署名をexact照合し、v3以前または定義が異なるDBは暗黙migrationせずfail closedで拒否して明示的な`--backup --reset-runtime`または`--backup --clean-install`を要求
+- Root high/xhigh/ultraの30 deterministic synthetic contract trace（10 case × 3 mode、negative/mutation testを含む）を検証する独立harnessを追加し、固定pair、許可edge、target・authority・snapshotの事前確認、assignment wait、role作業順、親子report gate、Root直接fallback禁止をhard gate化。live real-model fan-out matrixは未検証であり、synthetic traceはlive E2E証跡を主張しない
+
+`VERSION`は`2.0.0`です。互換性を維持しないmajor updateとして、旧runtimeを残した差分同期ではなく、必要なstateを保全したうえでの明示的な初期化を前提にします。
 
 ## [1.1.0] - 2026-07-14
 

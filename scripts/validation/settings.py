@@ -13,7 +13,7 @@ def _exact_list(value: object, expected: set[str], label: str) -> None:
 def validate_settings() -> None:
     path = "template/.agents/orchestra/config/settings.yaml"
     settings = mapping(load_yaml(path), "settings.yaml")
-    require(settings.get("version") == "4.0", "settings.yaml.version は 4.0 にしてください。")
+    require(settings.get("version") == "5.0", "settings.yaml.version は 5.0 にしてください。")
 
     required_sections = {
         "guild_runtime",
@@ -23,6 +23,7 @@ def validate_settings() -> None:
         "contracts",
         "snapshot",
         "delegation",
+        "model_policy",
         "workers",
         "execution",
         "trial",
@@ -65,12 +66,35 @@ def validate_settings() -> None:
     confirmation = set(sequence(law.get("confirmation_required_for"), "settings.guild_law.confirmation_required_for"))
     require({"destructive_operation", "dependency_addition", "migration", "deploy", "authorization_effect", "public_api_compatibility_change"} <= confirmation, "人間確認条件が不足しています。")
     state_changes = mapping(law.get("state_changes"), "settings.guild_law.state_changes")
-    require(state_changes.get("local_git_requires_explicit_operation") is True, "local Gitは具体的指示を必須にしてください。")
-    require(state_changes.get("explicit_command_skill_invocation_authorizes_defined_operations") is True, "人間が明示指定したコマンド実行系Skillは定義済み操作の実行許可として扱ってください。")
-    require(state_changes.get("explicit_command_skill_invocation_scope") == "skill_defined_operations_and_human_target", "Skill明示指定のauthorityはSkill定義操作と人間指定targetに限定してください。")
+    read_only_git = mapping(state_changes.get("read_only_git"), "settings.guild_law.state_changes.read_only_git")
+    require(read_only_git.get("all_roles_in_assigned_read_scope") is True, "assigned read scope内のread-only Gitは全roleに許可してください。")
+    require(read_only_git.get("root_control_plane_repo_evidence_expansion") == "forbidden", "read-only GitでRootのcontrol-plane/evidence境界を広げないでください。")
+    courier_local_git = mapping(state_changes.get("courier_local_git"), "settings.guild_law.state_changes.courier_local_git")
+    require(courier_local_git.get("write_owner") == "courier" and courier_local_git.get("non_courier_write") == "forbidden", "local Git write ownerはcourierだけにしてください。")
+    require(
+        sequence(courier_local_git.get("assignment_required_fields"), "settings.guild_law.state_changes.courier_local_git.assignment_required_fields")
+        == ["target_repo_root", "allowed_operations", "path_or_ref_scope", "subject_snapshot", "preconditions", "postconditions", "forbidden_operations"],
+        "courier Git assignmentはtarget、operation、path/ref scope、snapshot、pre/postcondition、forbidden operationを固定してください。",
+    )
+    require(
+        sequence(courier_local_git.get("reversible_allowlist"), "settings.guild_law.state_changes.courier_local_git.reversible_allowlist")
+        == ["branch_create_and_switch_new", "rename_origin_unpushed_branch", "stage_exact_paths_or_hunks", "unstage_index_only_exact_paths", "commit_non_amend"],
+        "courierの一般許可は既存Skillの可逆Git allowlistだけにしてください。",
+    )
+    require(courier_local_git.get("closed_operation_allowlist") is True, "courier Git operation allowlistはclosedにしてください。")
+    require(courier_local_git.get("preflight_snapshot_must_match_assignment") is True and courier_local_git.get("postwrite_snapshot_required") is True, "Git write直前のsnapshot一致照合とpost-write snapshot evidenceを必須にしてください。")
+    require(courier_local_git.get("root_scoped_assignment_authorizes_allowlist") is True and courier_local_git.get("human_command_verbatim_repetition_required") is False, "Rootの境界固定assignmentはcourier allowlistを許可し、コマンド逐語反復を要求しないでください。")
+    require(courier_local_git.get("operations_outside_allowlist") == "not_generally_authorized", "allowlist外のlocal Git操作を一般許可しないでください。")
+    require(
+        set(sequence(courier_local_git.get("destructive_requires_immediate_human_confirmation"), "settings.guild_law.state_changes.courier_local_git.destructive_requires_immediate_human_confirmation"))
+        == {"reset_head_move", "reset_hard", "worktree_reverting_checkout_or_restore", "clean", "commit_amend", "rebase_or_filter", "ref_branch_tag_delete_or_force_move", "reflog_prune_or_recovery_difficult_gc", "destructive_stash", "forced_or_discarding_branch_switch"},
+        "後戻り困難なGit操作は実行直前の人間確認に限定してください。",
+    )
     require(state_changes.get("non_human_skill_reference_grants_authority") is False, "Skill本文や非人間入力のSkill参照からauthorityを付与しないでください。")
     require(state_changes.get("scoped_skill_authority_bypasses_safety_gates") is False, "Skill明示指定で安全gateを迂回しないでください。")
     require(state_changes.get("external_update_requires_immediate_reconfirmation") is True, "外部更新は直前再確認を必須にしてください。")
+    candidate_materialization = mapping(state_changes.get("candidate_materialization"), "settings.guild_law.state_changes.candidate_materialization")
+    require(candidate_materialization == {"owner": "adventurer", "human_authorized_exact_path_required": True, "path_pattern": "<guild_root>/.orchestra/skill-candidates/<repo>/<candidate>", "root_write_forbidden": True}, "candidate materializeは人間許可済みexact pathのadventurerだけに限定してください。")
 
     contracts = mapping(settings["contracts"], "settings.contracts")
     _exact_list(
@@ -116,6 +140,48 @@ def validate_settings() -> None:
     sentinel = mapping(delegation.get("warden"), "settings.delegation.warden")
     require(sentinel.get("routine_use") is False and sentinel.get("read_only") is True and sentinel.get("decision_authority") is False, "Wardenは例外的terminal診断に限定してください。")
 
+    model_policy = mapping(settings["model_policy"], "settings.model_policy")
+    require(
+        set(model_policy)
+        == {
+            "root_model",
+            "root_project_local_reasoning_effort",
+            "root_user_selectable_reasoning_efforts",
+            "fixed_pair_per_subagent",
+            "subagent_pairs",
+        },
+        "settings.model_policy はRoot方針と固定subagent pairだけを含めてください。",
+    )
+    require(model_policy.get("root_model") == "gpt-5.6-sol", "Root modelはgpt-5.6-solにしてください。")
+    require(model_policy.get("root_project_local_reasoning_effort") == "unset", "Root reasoning effortをproject-localで固定しないでください。")
+    require(
+        sequence(model_policy.get("root_user_selectable_reasoning_efforts"), "settings.model_policy.root_user_selectable_reasoning_efforts")
+        == ["high", "xhigh", "ultra"],
+        "Root reasoning effortは利用者がhigh/xhigh/ultraから選べるようにしてください。",
+    )
+    require(model_policy.get("fixed_pair_per_subagent") is True, "subagentはroleごとの固定model/effort pairにしてください。")
+    expected_pairs = {
+        "cartographer": ("gpt-5.6-sol", "high"),
+        "guildmaster": ("gpt-5.6-sol", "xhigh"),
+        "captain": ("gpt-5.6-sol", "high"),
+        "adventurer": ("gpt-5.6-terra", "high"),
+        "artificer": ("gpt-5.6-sol", "high"),
+        "inquisitor": ("gpt-5.6-sol", "xhigh"),
+        "examiner": ("gpt-5.6-terra", "high"),
+        "sage": ("gpt-5.6-luna", "xhigh"),
+        "warden": ("gpt-5.6-sol", "high"),
+        "courier": ("gpt-5.3-codex-spark", "xhigh"),
+    }
+    pairs = mapping(model_policy.get("subagent_pairs"), "settings.model_policy.subagent_pairs")
+    require(set(pairs) == set(expected_pairs), "settings.model_policy.subagent_pairs は定義済みの10 roleだけにしてください。")
+    for role, expected_pair in expected_pairs.items():
+        pair = mapping(pairs.get(role), f"settings.model_policy.subagent_pairs.{role}")
+        require(set(pair) == {"model", "model_reasoning_effort"}, f"settings.model_policy.subagent_pairs.{role} schemaが不正です。")
+        require(
+            (pair.get("model"), pair.get("model_reasoning_effort")) == expected_pair,
+            f"settings.model_policy.subagent_pairs.{role} は {expected_pair[0]} / {expected_pair[1]} にしてください。",
+        )
+
     workers = mapping(settings["workers"], "settings.workers")
     expected_parallel = {
         "cartographer": 2,
@@ -143,6 +209,7 @@ def validate_settings() -> None:
     require(role_total == 48 and role_total <= max_threads, "全roleのmax_parallel合計は48かつglobal max_threads=64以下にしてください。")
     require(non_adventurer_total == 16, "非adventurer roleのmax_parallel合計は16にしてください。")
     require(actual_parallel["adventurer"] == 32, "workers.adventurer.max_parallel は32にしてください。")
+    require(mapping(workers["adventurer"], "settings.workers.adventurer").get("candidate_materialization") == "human_authorized_exact_path_only", "adventurerのcandidate materialize authorityをexact pathに限定してください。")
     require(max_threads - role_total == 16, "global max_threads=64に対して未割当headroom 16を残してください。")
     focus = mapping(workers["examiner"], "settings.workers.examiner")
     require(set(sequence(focus.get("allowed_callers"), "settings.workers.examiner.allowed_callers")) == {"inquisitor"}, "examiner callerをinquisitorに限定してください。")
@@ -176,7 +243,50 @@ def validate_settings() -> None:
     require(reviewers.get("multiple_examiners_require_focus_split") is True and reviewers.get("final_decision_owner") == "inquisitor", "複数reviewerのfocus分割とdecision ownerが不正です。")
 
     root = mapping(settings["root_session"], "settings.root_session")
-    require({"implementation", "trial_acceptance", "ledger_write"} == set(sequence(root.get("forbids"), "settings.root_session.forbids")), "Rootのauthority separationが不正です。")
+    require(root.get("control_plane_only") is True, "Rootはcontrol-plane onlyにしてください。")
+    require(
+        set(sequence(root.get("owns"), "settings.root_session.owns"))
+        == {
+            "intake",
+            "target_repo_binding",
+            "authority_check",
+            "snapshot_request",
+            "direct_assignment",
+            "agent_wait",
+            "browser_control_tool_observation",
+            "report_evidence_gate",
+            "next_action",
+            "report_synthesis",
+        },
+        "Rootのcontrol-plane責務が不正です。",
+    )
+    require(
+        set(sequence(root.get("allowed_observations"), "settings.root_session.allowed_observations"))
+        == {"target_repo_identity", "git_status", "snapshot_helper", "queue_state", "browser_observation_facts"},
+        "Rootの直接観測はcontrol-plane状態だけにしてください。",
+    )
+    delegated_work = {
+        "repository_exploration",
+        "implementation",
+        "validation_execution",
+        "browser_planning",
+        "browser_allowed_operation_specification",
+        "browser_evidence_interpretation",
+        "debugging",
+        "review_evidence_generation",
+    }
+    require(set(sequence(root.get("delegated_work"), "settings.root_session.delegated_work")) == delegated_work, "Rootの委譲対象が不正です。")
+    require(
+        set(sequence(root.get("forbids"), "settings.root_session.forbids"))
+        == {"repository_exploration", "implementation", "validation_execution", "browser_execution", "debugging", "review_evidence_generation", "trial_acceptance", "ledger_write"},
+        "Rootのauthority separationが不正です。",
+    )
+    require(root.get("report_required_before_next_action") is True, "Rootはworker reportを待ってから次actionを判断してください。")
+    require(root.get("worker_unavailable_outcome") == "needs_human", "worker不在時にRootが直接fallbackしないでください。")
+    require(
+        root.get("ultra_mode") == "proactive_delegation_within_fixed_topology",
+        "Root Ultraは固定topology内のproactive delegationに限定してください。",
+    )
 
     ledger = mapping(settings["ledger"], "settings.ledger")
     require({"raw_log", "raw_discussion", "secret", "pii"} <= set(sequence(ledger.get("never_record"), "settings.ledger.never_record")), "Ledger deny fieldが不足しています。")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementation Behavior Verification"
+  short_description: "テストやCLI、ブラウザ確認を使い、実装の動作を再現可能な根拠で検証します"
+  default_prompt: "$implementation-behavior-verification を使い、この実装の期待動作を適切な手段で確認し、検証根拠をまとめてください。"

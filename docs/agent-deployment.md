@@ -4,7 +4,7 @@ Codexはギルド規約rootで起動し、作業repoを `<guild_root>/repositori
 
 ## Configuration
 
-Root modelはSolに固定しますが、project-local reasoning effortは指定しません。起動時/UI/global configなどの利用者選択をそのまま使います。
+Root modelはSolに固定しますが、project-local reasoning effortは指定しません。起動時/UI/global configなどで利用者が選ぶ`high`、`xhigh`、`ultra`をそのまま使います。どのmodeでもRootはcoordinationとjudgeに専念し、対象repoの作業をnamed roleへ委譲します。
 
 ```toml
 model = "gpt-5.6-sol"
@@ -17,10 +17,12 @@ network_access = true
 [agents]
 max_threads = 64
 max_depth = 2
-job_max_runtime_seconds = 1800
+job_max_runtime_seconds = 2400
 ```
 
-clean installと通常の再installはいずれもproject-local `model_reasoning_effort`を出力しません。導入先に旧指定があれば再install時に除去し、reasoning effortの選択はsession/global/user設定へ委ねます。installerやorchestrationはeffortを自動選択しません。
+clean installと通常の再installはいずれもproject-local `model_reasoning_effort`を出力しません。導入先に旧指定があれば再install時に除去し、reasoning effortの選択はsession/global/user設定へ委ねます。installerやorchestrationはeffortを自動選択しません。`ultra`がproactiveに委譲する場合も、Root→named top-level roleと`inquisitor`→`examiner`以外の辺、depth、authorityを追加しません。
+
+`job_max_runtime_seconds=2400`は、xhighのSage助言とTrial判断が中途で打ち切られないためのjob単位の有界timeoutです。並列数、総spawn数、token、costの上限は変更しません。
 
 `workspace-write` agentの外部通信は有効です。外部通信を伴うコマンドも`approval_policy = "on-request"`と実行環境の承認境界に従います。
 
@@ -30,21 +32,21 @@ clean installと通常の再installはいずれもproject-local `model_reasoning
 
 | agent | model | sandbox | reasoning | responsibility |
 | --- | --- | --- | --- | --- |
-| Root | `gpt-5.6-sol` | `read-only` | project-local未指定 | intake、境界、直接assignment、最終統合 |
-| `adventurer` | `gpt-5.6-sol` | `workspace-write` | `high` | 一つのbounded scopeの実装と検証 |
+| Root | `gpt-5.6-sol` | `read-only` | project-local未指定。利用者が`high / xhigh / ultra`を選択 | control-plane確認、routing、evidence gate、次action、最終統合 |
+| `adventurer` | `gpt-5.6-terra` | `workspace-write` | `high` | 一つのbounded scopeの調査、実装、検証 |
 | `artificer` | `gpt-5.6-sol` | `workspace-write` | `high` | 共有契約、cross-scope glue、統合検証 |
-| `sage` | `gpt-5.6-sol` | `read-only` | `high` | 具体的な独立focusの助言 |
+| `sage` | `gpt-5.6-luna` | `read-only` | `xhigh` | 具体的な独立focusの助言 |
 | `cartographer` | `gpt-5.6-sol` | `read-only` | `high` | read-only mapmaking |
-| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `xhigh` | Ledgerと明示されたlocal Git操作 |
-| `examiner` | `gpt-5.6-sol` | `read-only` | `high` | 単一focusのbounded review evidence |
+| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `xhigh` | Ledgerと、境界固定assignmentの可逆local Git操作を行う唯一のGit write owner |
+| `examiner` | `gpt-5.6-terra` | `read-only` | `high` | 単一focusのbounded review evidence |
 | `guildmaster` | `gpt-5.6-sol` | `read-only` | `xhigh` | 複数Partyの広域戦略 |
-| `inquisitor` | `gpt-5.6-sol` | `read-only` | `high` | Trial、finding統合、最終decision |
+| `inquisitor` | `gpt-5.6-sol` | `read-only` | `xhigh` | Trial、finding統合、最終decision |
 | `captain` | `gpt-5.6-sol` | `read-only` | `high` | scope、順序、integration、Trial設計 |
 | `warden` | `gpt-5.6-sol` | `read-only` | `high` | 例外的な制御診断 |
 
-現在の5.6 subagent deploymentは、live非劣性確認までSolを維持します。phase oneでは`adventurer`、`cartographer`、`examiner`、`warden`のTerra/highと、`sage`のLuna/highおよびTerra/highを同じhighで比較します。`artificer`と`captain`は今回の低コスト化対象外です。Courierは5.3-Spark/xhighを維持します。
+deploymentは、decision authority、blast radius、scopeのboundedness、ownerによる再検証可能性から固定しています。高頻度で単一scopeを実装・検証する`adventurer`と、単一focusのevidenceだけを返す`examiner`はTerra/highです。狭いfocusでもarchitectureやsafetyの考慮漏れをownerが完全に再現できない`sage`はLuna/xhigh、Trialの最終採否と重大度統合を持つ`inquisitor`はSol/xhighとします。未知領域のomissionが下流へ波及する`cartographer`、scopeと共有契約を設計・統合する`captain` / `artificer`、例外時だけ難しい診断を行う`warden`はSol/highを維持し、最大blast radiusを持つ`guildmaster`はSol/xhighです。Courierは従来どおり5.3-Spark/xhighを維持します。
 
-subagentのreasoning effortはroleごとに固定し、実行中に動的変更しません。`guildmaster`は現行xhighとhigh、`inquisitor`は現行highとxhighをblind比較してから固定値を判断します。maxはroutine evalと全subagentから除外します。Rootの評価baselineはhighですが、runtime templateへはpinしません。
+subagentのreasoning effortはroleごとに固定し、実行中に動的変更しません。deployment pairに対するstronger / alternative challengerはmodel-selection evalで比較できますが、実行中の自動切替には使いません。`max`と`ultra`は全subagentから除外します。Rootのcomponent referenceはhighですが、runtime templateへはpinせず、high/xhigh/ultraを利用者が選びます。
 
 ## Guild role naming
 
@@ -58,20 +60,20 @@ custom agentの機械IDは、責務を推測できる一語のGuild職へ統一�
 | `advisor` | `sage` | owner判断を補う一論点のread-only助言 |
 | `quest_sentinel` | `warden` | 通常制御で解消しない例外の診断 |
 
-旧IDと新IDを同じruntimeで混在させません。通常installは旧agent fileを除去し、既存SQLite stateに旧worker ID、role、kindが残る場合はfail closedにします。必要なstateを保全したうえで`--backup --reset-runtime`または`--clean-install`を使ってください。
+旧IDと新IDを同じruntimeで混在させません。通常installは旧agent fileを除去し、既存SQLite stateに旧worker ID、role、kindが残る場合はfail closedにします。必要なstateを保全したうえで`--backup --reset-runtime`または`--backup --clean-install`を使ってください。
 
 ## Topology
 
 ```mermaid
 flowchart TB
-  root["Root\ncontract / direct assignment / synthesis"]
+  root["Root\ncontrol plane / routing / evidence gate / synthesis"]
   plan["cartographer / captain / guildmaster\nread-only planning"]
   worker["adventurer\nbounded implementation"]
   integrate["artificer\nshared contract / glue / integration validation"]
   trial["inquisitor\nrisk-triggered Trial"]
   examiner["examiner\nterminal read-only focus"]
   sage["sage\nindependent read-only advice"]
-  courier["courier\nLedger / explicit local Git"]
+  courier["courier\nLedger / scoped reversible local Git"]
 
   root --> plan
   plan --> root
@@ -88,7 +90,7 @@ flowchart TB
   root -.-> courier
 ```
 
-Rootだけがtop-level agentを起動し、`captain`などはterminalです。唯一の例外として`inquisitor`が`examiner`を直接起動し、完了を待ってevidenceを検証・統合します。nested assignmentのscopeとauthorityは親より狭められますが、helper-issued subject snapshotは親Trialと完全一致させます。depth 2を超える再帰fan-outは禁止します。
+Rootだけがtop-level agentを起動し、`captain`などはterminalです。唯一のnested edgeとして`inquisitor`が`examiner`を直接起動し、完了を待ってevidenceを検証・統合します。nested assignmentのscopeとauthorityは親より狭められますが、helper-issued subject snapshotは親Trialと完全一致させます。depth 2を超える再帰fan-outは禁止します。Rootはtarget、authority、snapshot、queueをcontrol-planeとして確認し、roleが仕様化したbrowser-control toolだけを実行して観測事実を記録します。対象repoの探索、コード・差分の読み取り、実装、test、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集を直接行いません。high/xhigh/ultraのどのmodeでもこの境界を維持します。
 
 ## Integration
 
@@ -118,7 +120,7 @@ Rootだけがtop-level agentを起動し、`captain`などはterminalです。�
 メジャー更新や旧構成を確実に片付ける場合:
 
 ```bash
-./scripts/clean_install.sh --target /path/to/guild-root
+./scripts/clean_install.sh --target /path/to/guild-root --backup
 ```
 
 既存導入を差分更新する場合:
@@ -128,26 +130,32 @@ Rootだけがtop-level agentを起動し、`captain`などはterminalです。�
 ```
 
 source template内のsymlink、secret-like path、MCPなどの外部tool連携pathは拒否します。既存Ledgerの物理schemaが互換でない場合は自動migrationせず、backup/resetまたはclean installを使います。
+clean installはnon-dry-runで`--backup`を必須とし、削除前の管理対象を`.agent-guild-orchestra-backups/<timestamp>/`へ退避します。`.orchestra/skill-candidates/`、`repositories/`、third-party Skill、`AGENTS.md`と`.git/info/exclude`の管理ブロック外は保持し、queue、Ledger、dashboard、その他の既存・未知runtime sibling、本プロジェクト管理の導入物を削除または初期化します。復元不能な実行を意図する場合だけ`--allow-clean-install-without-backup`を明示できます。このescape hatchではbackupを作成しません。
 
 ## Validation
 
 ```bash
 make validate
-python3 scripts/model_selection_eval.py validate
-python3 scripts/model_selection_eval.py plan
+./scripts/docker_python.sh scripts/model_selection_eval.py validate
+./scripts/docker_python.sh scripts/model_selection_eval.py plan
+./scripts/docker_python.sh scripts/root_orchestration_eval.py validate
+./scripts/docker_python.sh scripts/root_orchestration_eval.py plan
 ```
+
+これらはREADMEの前提どおりDocker image内で実行する再現可能な標準経路です。hostの`python3`を直接使うのは任意で、Python 3.10以上かつ`requirements.txt`の依存関係（Python 3.10では`tomli`を含む）を満たす場合だけにしてください。
 
 validatorは次を確認します。
 
-- Root modelはSol、reasoning effortはproject-local未指定（評価baselineのhighとは分離）
-- GuildmasterとInquisitorのSol high/xhigh比較、およびsubagent max禁止
+- Root modelはSol、reasoning effortはproject-local未指定、利用者選択はhigh/xhigh/ultra（component referenceのhighとは分離）
+- deployment pairとchallengerの分離、およびsubagentのmax/ultra禁止
+- Rootのcoordination-only境界と、ultraを含むnamed-role topology
 - Courier Spark/xhighの維持
 - inquisitorだけのnested capabilityと、その他custom agentのterminal設定
-- `max_threads=64`、`max_depth=2`
+- `max_threads=64`、`max_depth=2`、`job_max_runtime_seconds=2400`
 - 全10 roleの`max_parallel`合計48、非adventurer合計16、`adventurer.max_parallel=32`、未割当headroom 16
 - compact promptの行数と旧制約の不在
 - target/secret/state-change/snapshot/lineageのfail-closed
 - prompt profile、role topology、model/effortを分離した評価契約
-- end-to-end final outcome hard gate
+- Root high/xhigh/ultraの30 deterministic synthetic contract trace hard gate（10 case × 3 mode。negative/mutation testを含む）。live real-model fan-out matrixは未検証で、synthetic self-testは実fan-out真正性を示さない
 
 live model比較は外部送信許可とreview済みwrapper/profileがある場合だけ実行します。component scoreだけでproduction最適化を断定しません。

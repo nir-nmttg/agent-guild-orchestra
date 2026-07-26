@@ -1,8 +1,9 @@
 ---
 name: pull-request-description-from-branch
 description: "Root が courier を呼び出し、repositories/ 配下の対象リポジトリのブランチ対応内容の確認と Pull Request タイトル・説明文生成を実行させる時に使います。"
-owner: agent-guild-orchestra
-scope: target-repository-workflow
+metadata:
+  owner: agent-guild-orchestra
+  scope: target-repository-workflow
 ---
 
 # pull-request-description-from-branch

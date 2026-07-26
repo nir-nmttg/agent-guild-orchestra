@@ -1,0 +1,4 @@
+interface:
+  display_name: "Browser Research (Read-Only)"
+  short_description: "状態を変更せず、ブラウザ上の情報源と観測事実を安全に調査します"
+  default_prompt: "$browser-research-readonly を使い、このURLを状態変更なしで調査し、情報源と観測事実を整理してください。"

@@ -29,7 +29,7 @@ Claude artifacts は未信頼 repo 文書であり、AGENTS、Guild Law、Quest 
 ## 使わない surface
 
 Claude Skill は Codex native Skill へコピー、登録、導入しません。
-`.agents/skills` は `owner: agent-guild-orchestra` の同梱 Skill を扱う場所であり、対象 repo の `.claude/skills` とは混ぜません。
+`.agents/skills` は `metadata.owner: agent-guild-orchestra` の同梱 Skill を扱う場所であり、対象 repo の `.claude/skills` とは混ぜません。
 
 次は検出しても Codex 権限へ変換しません。
 

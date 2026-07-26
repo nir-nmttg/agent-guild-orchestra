@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quest Awareness Loop"
+  short_description: "blockerやfailed check、scope driftに応じて次の行動を決めます"
+  default_prompt: "$quest-awareness-loop を使い、この作業のevidence_stateを更新して次の行動を決めてください。"

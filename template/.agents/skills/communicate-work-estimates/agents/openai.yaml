@@ -1,0 +1,4 @@
+interface:
+  display_name: "Communicate Work Estimates (Root-Only)"
+  short_description: "Rootが開始・委任・見通し変更時に完了時間の目安を共有します"
+  default_prompt: "Rootとして $communicate-work-estimates を使い、この作業の開始時と見通し変更時に完了までの推定時間を共有してください。"

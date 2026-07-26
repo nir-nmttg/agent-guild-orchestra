@@ -27,7 +27,7 @@
 ## 流れ
 
 1. ownerがsource mutationを止め、snapshotとevidenceを固定します。
-2. RootがSol/highのterminal `warden`を直接起動します。
+2. Rootがdeploymentで固定されたterminal `warden`を直接起動します。
 3. Wardenはblocker、failed check、矛盾、scope drift、高リスクtriggerを区別します。
 4. 根拠付きの`recommended_next_action`、停止条件、必要なescalationだけを返します。
 5. ownerが根拠を確認し、採用、却下、未解決を決めます。

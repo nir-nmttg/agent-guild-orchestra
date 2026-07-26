@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Safe Push from Branch"
+  short_description: "push前のread-only監査と人間確認を経て、対象ブランチを安全にpushします"
+  default_prompt: "$github-safe-push-from-branch を使い、このブランチを監査してからGitHubへ安全にpushしてください。"

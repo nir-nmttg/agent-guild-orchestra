@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explain Clearly"
+  short_description: "Give clear, level-aware explanations with evidence"
+  default_prompt: "Use $explain-clearly to give a clear, level-aware explanation of this."

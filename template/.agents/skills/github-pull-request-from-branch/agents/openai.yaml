@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Pull Request from Branch"
+  short_description: "安全監査済みの未pushブランチをpushし、説明付きPull Requestを作成します"
+  default_prompt: "$github-pull-request-from-branch を使い、このブランチを安全にpushしてPull Requestを作成してください。"

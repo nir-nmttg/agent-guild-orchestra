@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refine Design Plan"
+  short_description: "設計案の漏れ・過剰・代替案を確認し、最小十分な計画へ仕上げます"
+  default_prompt: "Use $refine-design-plan to stress-test this design and finish a minimal, verifiable implementation plan."

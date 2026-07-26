@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orchestra Instruction Contract Review"
+  short_description: "AGENTSと役割指示、prompt雛形の責務境界と整合性をレビューします"
+  default_prompt: "$orchestra-instruction-contract-review を使い、オーケストレーションの指示契約と責務境界をレビューしてください。"

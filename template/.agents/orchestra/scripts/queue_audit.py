@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,8 @@ import sys
 from typing import Any
 
 
-QUEUE_SCHEMA_VERSION = "3.0"
+QUEUE_SCHEMA_VERSION = "4.0"
+QUEUE_SCHEMA_SHA256 = "a883418f960b28bc84381ed00fe4a9b55eb870e50a41fa26122ace122acb7c7c"
 SQLITE_DB_NAME = "state.sqlite"
 
 REQUIRED_TABLES = {
@@ -456,10 +458,10 @@ def validate_target_repo_roots(value: Any, label: str, guild_root: Path, errors:
 def validate_no_legacy_keys(value: Any, label: str, errors: list[str]) -> None:
     for json_path, key in iter_keys(value):
         if key in LEGACY_JSON_KEYS or key in LEGACY_RUNTIME_STRING_VALUES:
-            errors.append(f"{label}{json_path[1:]}: v3 Ledger に廃止済み key `{key}` が残っています。")
+            errors.append(f"{label}{json_path[1:]}: v4 Ledger に廃止済み key `{key}` が残っています。")
     for json_path, item in iter_values(value):
         if isinstance(item, str) and item in LEGACY_RUNTIME_STRING_VALUES:
-            errors.append(f"{label}{json_path[1:]}: v3 Ledger に廃止済み runtime 値 `{item}` が残っています。")
+            errors.append(f"{label}{json_path[1:]}: v4 Ledger に廃止済み runtime 値 `{item}` が残っています。")
 
 
 def iter_named_values(value: Any, target_key: str, path: str = "$") -> list[tuple[str, Any]]:
@@ -740,7 +742,37 @@ def audit_assignment_machine_contract(payload: dict[str, Any], label: str, error
         errors.append(f"{label}.integration_barrier: artificer以外には指定できません。")
 
 
-def audit_schema(connection: sqlite3.Connection, errors: list[str]) -> bool:
+def schema_signature(connection: sqlite3.Connection) -> tuple[tuple[str, str, str, str], ...]:
+    rows = connection.execute(
+        """
+        SELECT type, name, tbl_name, sql
+        FROM sqlite_master
+        WHERE type IN ('table', 'index', 'view', 'trigger')
+        ORDER BY type, name, tbl_name
+        """
+    ).fetchall()
+    return tuple(
+        (str(row[0]), str(row[1]), str(row[2]), " ".join(str(row[3] or "").split()))
+        for row in rows
+        if not str(row[1]).startswith("sqlite_")
+    )
+
+
+def canonical_schema_signature(static_root: Path) -> tuple[tuple[str, str, str, str], ...]:
+    path = static_root / "scripts" / "queue_schema.sql"
+    content = path.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+    if digest != QUEUE_SCHEMA_SHA256:
+        raise ValueError(f"queue_schema.sql SHA-256 がv{QUEUE_SCHEMA_VERSION} contractと一致しません: {digest}")
+    try:
+        with sqlite3.connect(":memory:") as expected:
+            expected.executescript(content.decode("utf-8"))
+            return schema_signature(expected)
+    except (UnicodeDecodeError, sqlite3.DatabaseError) as exc:
+        raise ValueError(f"canonical queue_schema.sqlを検証できません: {exc}") from exc
+
+
+def audit_schema(connection: sqlite3.Connection, static_root: Path, errors: list[str]) -> bool:
     schema_errors: list[str] = []
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     legacy_tables = sorted(LEGACY_TABLES & tables)
@@ -766,6 +798,30 @@ def audit_schema(connection: sqlite3.Connection, errors: list[str]) -> bool:
         unexpected_columns = sorted(columns - required_columns - LEGACY_COLUMNS.get(table, set()))
         if unexpected_columns:
             schema_errors.append(f"{table}: 未知 column があります: " + ", ".join(unexpected_columns))
+    try:
+        expected_signature = canonical_schema_signature(static_root)
+        actual_signature = schema_signature(connection)
+    except (OSError, ValueError, sqlite3.DatabaseError) as exc:
+        schema_errors.append(str(exc))
+    else:
+        if actual_signature != expected_signature:
+            expected_by_name = {(item[0], item[1]): item for item in expected_signature}
+            actual_by_name = {(item[0], item[1]): item for item in actual_signature}
+            missing = sorted(f"{kind}:{name}" for kind, name in expected_by_name.keys() - actual_by_name.keys())
+            unexpected = sorted(f"{kind}:{name}" for kind, name in actual_by_name.keys() - expected_by_name.keys())
+            changed = sorted(
+                f"{kind}:{name}"
+                for kind, name in expected_by_name.keys() & actual_by_name.keys()
+                if expected_by_name[(kind, name)] != actual_by_name[(kind, name)]
+            )
+            details = []
+            if missing:
+                details.append("不足=" + ",".join(missing))
+            if unexpected:
+                details.append("未知=" + ",".join(unexpected))
+            if changed:
+                details.append("定義差分=" + ",".join(changed))
+            schema_errors.append("canonical table/index/constraint signature不一致: " + "; ".join(details))
     errors.extend(schema_errors)
     return not schema_errors
 
@@ -1453,7 +1509,7 @@ def main() -> int:
     errors: list[str] = []
 
     with connect_read(database_path) as connection:
-        schema_ok = audit_schema(connection, errors)
+        schema_ok = audit_schema(connection, args.static_root, errors)
         counts: dict[str, int] = {}
         if schema_ok:
             audit_metadata(connection, errors)

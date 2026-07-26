@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repository Design Mapmaking"
+  short_description: "read-only調査で既存構成、危険地帯、実装候補と検証方針を整理します"
+  default_prompt: "$repository-design-mapmaking を使い、対象リポジトリをread-onlyで調査して設計地図と実装方針を整理してください。"

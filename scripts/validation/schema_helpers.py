@@ -13,7 +13,7 @@ from .rules import (
 def validate_template_metadata(document: dict[str, object], rel: str) -> None:
     for key in ARTIFACT_REQUIRED_FIELDS:
         require(key in document, f"{rel} に {key} が必要です。")
-    require(document["schema_version"] == "3.0", f"{rel}.schema_version は 3.0 にしてください。")
+    require(document["schema_version"] == "4.0", f"{rel}.schema_version は 4.0 にしてください。")
     usage = mapping(document.get("structured_data_usage"), f"{rel}.structured_data_usage")
     for key in STRUCTURED_DATA_USAGE_FIELDS:
         require(key in usage, f"{rel}.structured_data_usage.{key} が必要です。")

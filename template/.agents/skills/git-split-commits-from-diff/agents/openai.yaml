@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Split Commits from Diff"
+  short_description: "未コミット差分を対応内容ごとの小さな単位に分けて順番にコミットします"
+  default_prompt: "$git-split-commits-from-diff を使い、現在の差分を対応内容ごとの小さなコミットへ安全に分けてください。"

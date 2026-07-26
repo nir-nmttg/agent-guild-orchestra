@@ -6,7 +6,7 @@
 
 Codexを、成果品質、安全な権限境界、検証可能性を優先して動かすためのGuild runtimeテンプレートです。実作業のリポジトリとオーケストレーション用の契約・状態を分離し、作業の大きさとリスクに応じた委譲、検証、監査を支援します。
 
-現在のバージョンは`1.1.0`です。
+現在のバージョンは`2.0.0`です。
 
 > [!IMPORTANT]
 > このプロジェクトは独立したコミュニティプロジェクトであり、OpenAIによる公式提供、提携、支援、承認を受けたものではありません。Codex、GPTおよびOpenAIはOpenAIの商標または登録商標です。本プロジェクトはOpenAIのロゴを使用しません。
@@ -35,7 +35,7 @@ Codexを、成果品質、安全な権限境界、検証可能性を優先して
 - Codexのproject-local設定とcustom agentを利用できる環境
 - Docker imageの初回build時に、base imageとPython依存関係を取得できるネットワーク
 
-ホストへPythonパッケージを直接インストールする必要はありません。検証と導入スクリプトはDocker内のPythonで実行されます。
+通常の検証と導入でホストへPythonパッケージを直接インストールする必要はありません。`make validate`と`./scripts/docker_python.sh`は、requirementsを含むDocker image内のPythonで実行されます。hostで直接`python3`を使うのは任意の運用であり、Python 3.10以上かつ`requirements.txt`の依存関係（Python 3.10では`tomli`を含む）を満たす場合だけにしてください。
 
 ## 初回導入
 
@@ -109,12 +109,12 @@ make validate
 | `.agents/orchestra/` | 削除後、現在のtemplateから再作成 |
 | `.agents/skills/` | 本プロジェクトがownerのskillだけを削除後、再作成。他ownerのskillは保持 |
 | `.codex/` | ディレクトリ全体を削除後、再作成。独自設定がある場合はbackupから必要部分を選んで復元 |
-| `.orchestra/` | 削除後、queue・Ledger・dashboardを初期状態で再作成 |
+| `.orchestra/` | `skill-candidates/`だけを保持し、他の既存・未知runtime siblingを削除後、queue・Ledger・dashboardを初期状態で再作成 |
 | `AGENTS.md` | 本プロジェクトの管理ブロックだけを除去後、再作成。ブロック外は保持 |
 | `.git/info/exclude` | 本プロジェクトの管理ブロックだけを除去後、再作成。ブロック外は保持 |
 | `repositories/`とその配下 | 保持。移動・削除・backupの対象外 |
 
-`.orchestra/`の監査履歴が必要な場合や`.codex/`に独自設定がある場合は、実行前にbackupの保存先と復元方針を確認してください。
+`.orchestra/`の監査履歴や`skill-candidates/`以外の独自runtime artifactが必要な場合、または`.codex/`に独自設定がある場合は、実行前にbackupの保存先と復元方針を確認してください。
 
 ## 変更される範囲とバックアップ
 
@@ -127,7 +127,7 @@ make validate
 - `repositories/`ディレクトリ
 - Gitリポジトリの場合は`.git/info/exclude`内の管理ブロック（`--no-git-exclude`で省略可能）
 
-`--backup`は、既存の`AGENTS.md`、`.git/info/exclude`、`.agents/`、`.codex/`、`.orchestra/`をtimestamp付きディレクトリへコピーします。`repositories/`配下は含みません。
+`--backup`は、既存の`AGENTS.md`、`.git/info/exclude`、`.agents/`、`.codex/`、`.orchestra/`をtimestamp付きディレクトリへコピーします。`repositories/`配下は含みません。non-dry-runの`--clean-install`は既定で`--backup`が必須です。復元不要と判断した時だけ、明示的な危険な逃げ道`--allow-clean-install-without-backup`を指定できます。この指定では削除前の証跡を作らず、復元できません。
 
 ## 復元とアンインストール
 
@@ -171,20 +171,23 @@ secret、token、credential、password、key、認証情報、PIIは読まず、
 - `Guild Law`: 対象リポジトリ、secret・PII、状態更新に関する安全境界
 - task contract: objective、success criteria、scope、authority、validationの明確化
 - `evidence_state`: blocker、失敗したcheck、scope drift、high-risk trigger、検証状況の追跡
-- risk-based delegation / Trial: 独立して境界を切れる作業だけをagentへ委譲
+- coordination-only Root: 対象repoを読まない回答・説明だけをfast pathとし、target・authority・snapshot・queue、routing、evidence gate、次action、最終synthesisに専念。role仕様どおりのbrowser-control tool実行と観測事実記録だけが狭い例外
+- role-based delegation / Trial: 対象repoの探索、コード読解、実装、test、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集をnamed roleへ委譲
+- Root orchestration trace gate: `high / xhigh / ultra`の固定pair、許可edge、target・authority・snapshot refの事前確認、assignmentごとのwait、role phaseと親子report evidence gateの順序、no-direct-fallbackを、10 case × 3 mode の30 deterministic synthetic contract trace（negative/mutation testを含む）で検証。live real-model fan-out matrixは未検証で、synthetic traceはその実証を代替しない
 - `Ledger`: 検証根拠と残リスクを記録するSQLite監査履歴
 - helper-issued snapshotとqueue lineageのfail-closedな検証
 
-数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。Rootはtop-level assignmentを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。
+数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。RootはSolに固定し、reasoning effortはproject-localへ固定せず、利用者が`high`、`xhigh`、`ultra`から選びます。どのmodeでもRootはnamed top-level assignmentだけを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。bounded implementationの`adventurer`とbounded reviewの`examiner`はTerra/high、独立focusの助言を返す`sage`はLuna/xhigh、Trialの最終decisionを持つ`inquisitor`はSol/xhighを使います。その他の広い判断・統合・例外診断を持つroleも、役割に必要十分なSol pairを維持します。Courierは従来どおりSpark/xhighです。
 
 利用例は[ユースケース集](docs/use-cases/README.md)、設計の詳細は[orchestration runtime](docs/orchestration-runtime.md)と[agent deployment](docs/agent-deployment.md)、モデル選択の方針は[モデル選択評価](docs/model-selection-evaluation.md)を参照してください。
 
 ## 対応範囲と既知の制約
 
 - 導入modeは現在`copy`のみです。
-- runtime schema v3を前提とします。古いschemaの状態は、そのまま保持更新できない場合があります。
+- runtime schema v4（`4.0`）を前提とし、canonical schemaのSHA-256とtable / column型 / constraint / index定義をexact照合します。v3以前または物理定義が異なるSQLite stateは暗黙migrationせず拒否するため、必要なstateを保全したうえで`--backup --reset-runtime`または`--backup --clean-install`を行ってください。
 - Docker imageはbuild時に外部registryとPython package indexへ接続します。オフライン環境では事前準備が必要です。
 - Codexやモデルの提供状況、設定形式、利用条件の変更により、role設定の調整が必要になる場合があります。
+- Root orchestrationのlive E2E matrixは未取得です。通常validatorのsynthetic trace self-testは契約実装を検証しますが、実model fan-outの実証を代替しません。
 - 本プロジェクトの安全境界は運用を支援する契約であり、OS、container、GitHubなどのアクセス制御を代替しません。
 - `repositories/`配下のアプリケーション自体の品質、ライセンス、セキュリティは各リポジトリの管理者が確認してください。
 

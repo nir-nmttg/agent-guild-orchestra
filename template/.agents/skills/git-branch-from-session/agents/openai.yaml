@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Branch from Session"
+  short_description: "セッションの作業意図から安全なブランチ名を作り、対象repoで作成します"
+  default_prompt: "$git-branch-from-session を使い、このセッションの作業意図に合うブランチを対象repoで安全に作成してください。"

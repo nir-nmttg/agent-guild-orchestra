@@ -1,5 +1,5 @@
 artifact_type: "trial_report"
-schema_version: "3.0"
+schema_version: "4.0"
 workflow_id: null
 structured_data_usage:
   structured_inputs: []
