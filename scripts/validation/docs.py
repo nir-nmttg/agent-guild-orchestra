@@ -348,6 +348,15 @@ def validate_docs_and_instructions() -> None:
         "Rootが`examiner`を直接起動",
     ):
         require(stale_root_contract not in agents, f"AGENTS.md に旧Root直接作業契約 `{stale_root_contract}` を戻さないでください。")
+    for token in (
+        "設計ownerのglobal invariant",
+        "terminal convergence gate",
+        "固定済みsuccess criterionまたは観測根拠のあるconcrete risk mitigation",
+        "material risk-surface delta",
+        "new material evidence",
+        "新しいsuccess criteria、scope、authorityが必要なら同じloopへ追加せず",
+    ):
+        require(token in agents, f"AGENTS.md にdesign convergence契約 `{token}` が必要です。")
 
     common = read("template/.agents/orchestra/instructions/common.md")
     require("custom agentの起動時promptへ重ねて読み込みません" in common, "common.mdは常時promptではないことを明記してください。")
@@ -367,6 +376,13 @@ def validate_docs_and_instructions() -> None:
         require("browser-control toolを呼ばない" in text, f"{rel} はsubagentのbrowser-control tool禁止を明記してください。")
         require("objective・URL・authority・許可操作" in text, f"{rel} はRoot browser handoffを仕様化してください。")
         require("Root" in text and "観測事実" in text, f"{rel} はRootの観測事実記録を明記してください。")
+
+    contract_review = read("template/.agents/skills/orchestra-instruction-contract-review/SKILL.md")
+    for token in ("terminal convergence gate", "material risk-surface delta", "new material evidence", "処置済みで未変更の領域は再開しない", "needs_human`または新しいtask contract"):
+        require(token in contract_review, f"orchestra-instruction-contract-review に収束条件 `{token}` が必要です。")
+    final_review = read("template/.agents/skills/branch-implementation-final-review/SKILL.md")
+    for token in ("未達のfixed success criterion", "authority／scope／safety invariant違反", "再現可能なevidenceを伴うCritical/Major", "Minorや一般改善はblockingにしない", "未解決blocking finding", "影響領域だけをscopeにする", "nonblocking Minorは再Trialしない"):
+        require(token in final_review, f"branch-implementation-final-review にblocking/reTrial境界 `{token}` が必要です。")
 
     deployment = read("docs/agent-deployment.md")
     runtime = read("docs/orchestration-runtime.md")

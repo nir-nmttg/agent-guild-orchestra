@@ -1,0 +1,96 @@
+id: overdesign_convergence_trial
+fixture_mode: static_contract_example
+summary: "設計とTrialは根拠を変えるmaterial deltaだけで再開し、完了済みの一般改善でloopを増やさない"
+input:
+  initial_status: ready
+  existing_design_skill: refine-design-plan
+expected:
+  terminal_convergence_gate:
+    owner: design_owner
+    uses_existing_skill: refine-design-plan
+    before_handoff: true
+    terminal: true
+    element_support_required:
+      - fixed_success_criterion
+      - concrete_risk_mitigation_with_observed_evidence
+    unsupported_elements: remove_or_send_to_separate_contract
+  trial_disposition_cases:
+    remediated_major_without_new_evidence:
+      major_finding: remediated_with_evidence
+      new_material_evidence: false
+      material_risk_surface_delta: false
+      outcome: accept_with_risks
+      retrial_allowed: false
+      retrial_scope: []
+    unresolved_major:
+      trigger: unresolved_blocking_finding
+      unresolved_major: true
+      blocking: true
+      affected_areas:
+        - instruction_contract
+      retrial_allowed: true
+      retrial_scope:
+        - instruction_contract
+      outcome: request_changes
+      close_allowed: false
+      next_action: rerun_focused_trial
+    safety_invariant_violation:
+      safety_invariant_violation: true
+      blocking: true
+      outcome: request_changes
+      close_allowed: false
+    relevant_failed_validation:
+      relevant_failed_validation: true
+      blocking: true
+      outcome: request_changes
+      close_allowed: false
+    unresolved_nonblocking_minor:
+      trigger: nonblocking_minor
+      blocking: false
+      retrial_allowed: false
+      retrial_scope: []
+      outcome: accept_with_risks
+      next_action: record_optional_improvement
+    material_risk_surface_delta:
+      trigger: material_risk_surface_delta
+      affected_areas:
+        - authorization_boundary
+      retrial_allowed: true
+      retrial_scope:
+        - authorization_boundary
+      outcome: retrial
+      next_action: rerun_focused_trial
+    new_material_evidence:
+      trigger: new_material_evidence
+      affected_areas:
+        - validation_adapter
+      retrial_allowed: true
+      retrial_scope:
+        - validation_adapter
+      outcome: retrial
+      next_action: rerun_focused_trial
+    new_success_criterion:
+      new_success_criteria: true
+      new_scope: false
+      new_authority: false
+      same_loop_addition_allowed: false
+      outcome: needs_human
+      next_action: new_task_contract
+    new_scope:
+      new_success_criteria: false
+      new_scope: true
+      new_authority: false
+      same_loop_addition_allowed: false
+      outcome: needs_human
+      next_action: new_task_contract
+    new_authority:
+      new_success_criteria: false
+      new_scope: false
+      new_authority: true
+      same_loop_addition_allowed: false
+      outcome: needs_human
+      next_action: new_task_contract
+  forbidden:
+    reopen_unchanged_remediated_area: true
+    add_new_contract_surface_to_current_loop: true
+    request_changes_for_minor_or_general_improvement: true
