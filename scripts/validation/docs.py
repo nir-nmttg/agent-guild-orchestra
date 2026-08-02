@@ -227,6 +227,17 @@ def validate_agents() -> None:
         require(token in adventurer_developer, f"adventurer roleのcandidate materialize契約に `{token}` が必要です。")
     agents_contract = read("template/AGENTS.md")
     require("exact `<guild_root>/.orchestra/skill-candidates/<repo>/<candidate>/`" in agents_contract and "`adventurer`が新規materialize" in agents_contract, "AGENTS.mdのcandidate materialize owner/path契約が不足しています。")
+    design_gate_lines = [line for line in agents_contract.splitlines() if line.startswith("- 設計ownerのglobal invariantとして、")]
+    require(len(design_gate_lines) == 1, "AGENTS.mdに設計owner向けのglobal terminal convergence gateを1つ定義してください。")
+    design_gate = design_gate_lines[0]
+    design_gate_contract = {
+        "適用範囲": ("設計レビューに限らず", "すべての設計案・実装計画を最終化する前に", "handoff前のterminal convergence gate"),
+        "既存workflow": ("既存の`refine-design-plan`",),
+        "考慮漏れ確認": ("固定済みsuccess criteria・constraints", "変更に関係する重要risk", "integration/validation", "運用/互換性", "考慮漏れがないか"),
+        "最小十分性": ("各設計要素", "固定済みsuccess criterion", "観測根拠のあるconcrete risk mitigation", "将来抽象化・将来用拡張・一般的なdefense-in-depth", "削除するか別contractへ送", "最小十分で検証可能な設計へ収束"),
+    }
+    for concern, required_meaning in design_gate_contract.items():
+        require(all(meaning in design_gate for meaning in required_meaning), f"AGENTS.mdの設計terminal convergence gateに{concern}の契約が不足しています。")
     candidate_skill = read("template/.agents/skills/create-skill-candidate-from-gap/SKILL.md")
     require("materialize owner" in candidate_skill and "`adventurer` owner" in candidate_skill and "exact candidate path" in candidate_skill, "candidate Skillのowner/path契約が不足しています。")
     settings = mapping(load_yaml("template/.agents/orchestra/config/settings.yaml"), "settings.yaml")
