@@ -295,13 +295,13 @@ def _validate_current_deployment_docs() -> None:
     for token in ("`sage`はLuna/xhigh", "`inquisitor`はSol/xhigh"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
-    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[Unreleased]")
+    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.0.0] - 2026-07-26")
     for token in (
         "`sage`をLuna/xhigh",
         "`inquisitor`をSol/xhigh",
         "`job_max_runtime_seconds`を1800秒から2400秒へ延長",
     ):
-        require(token in changelog, f"CHANGELOG.md のUnreleased契約に `{token}` が必要です。")
+        require(token in changelog, f"CHANGELOG.md のv2.0.0契約に `{token}` が必要です。")
 
     deployment_text = read("docs/agent-deployment.md")
     configuration = _markdown_h2_section("docs/agent-deployment.md", deployment_text, "Configuration")

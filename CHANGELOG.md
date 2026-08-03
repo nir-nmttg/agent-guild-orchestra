@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+現在、記録対象の変更はありません。
+
+## [2.1.0] - 2026-08-03
+
+### 概要
+
+- 設計案と実装計画をhandoff前に最小十分で検証可能な状態へ収束させるterminal convergence gateを追加
+- reviewとTrialの再開条件を重要な根拠変化へ限定し、処置済み領域やnonblocking Minorによる不要なloopを抑制
+- 人間向けの説明を、結論と理解に必要な前提から分かりやすく提示する出力原則を追加
+
+### 変更
+
+- 各設計要素をfixed success criterionまたは観測根拠のあるconcrete risk mitigationへ対応付け、根拠のない将来抽象化・拡張は削除または別contractへ分離
+- `request_changes`を未達のfixed success criterion、authority／scope／safety invariant違反、対象検証を妨げる失敗、再現可能なCritical／Majorへ限定
+- 再Trialを未解決blocking finding、material risk-surface delta、new material evidenceの影響領域へ限定
+- overdesign convergenceのgolden quest fixtureとvalidationを追加
+
+`VERSION`は`2.1.0`です。runtime schema、model routing、installer、依存関係、公開APIは変更しない後方互換のminor updateです。
+
+## [2.0.0] - 2026-07-26
+
 ### Breaking changes
 
 - RootをSol固定のcoordination / judge専任とし、対象repoの探索、コード読解、実装、test、browserの計画/解釈、debug、review evidence収集をnamed subagentへ必ず委譲。browser-control toolだけはrole仕様どおりRootが実行して観測事実を記録
