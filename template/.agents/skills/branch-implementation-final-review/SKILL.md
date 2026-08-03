@@ -40,16 +40,16 @@ metadata:
 4. 追加観点はdiffのrisk signalから選ぶ。たとえば認可変更ならsecurity、schema変更ならmigration/compatibility、hot pathならperformance、UI変更ならaccessibilityを確認する。関係しない観点の定型監査は行わない。
 5. 既存パターン、責務境界、エラー処理、境界条件、テスト容易性、保守性は、今回の差分で破綻または負債が増える兆候がある範囲だけ確認する。
 6. dead code、重複、共通化候補は、削除・抽象化による実益と回帰・scope拡大リスクを比較する。将来利用や互換性が不明なら推測で変更を要求しない。
-7. Critical/Major、success criteria未達、検証不能、高リスクの未解決は根拠と最小の追加Quest案を返す。
-8. Minorは、成功条件、明確さ、保守性、回帰防止への実益が追加変更リスクを上回る場合だけ修正候補にする。それ以外は残リスクまたは任意改善として記録し、完了を妨げない。
-9. 追加修正後の再Trialは、変更されたrisk surfaceまたは未解決findingを独立確認する必要がある時だけ行う。
+7. `request_changes`は、未達のfixed success criterion、authority／scope／safety invariant違反、対象検証を妨げるfailed validation、または再現可能なevidenceを伴うCritical/Majorだけに限る。新しいsuccess criteria、scope、authorityが必要なら同じTrialで追加せず、`needs_human`または新しいtask contractへ戻す。
+8. Minorは、成功条件、明確さ、保守性、回帰防止への実益が追加変更リスクを上回る場合だけ修正候補にする。それ以外は残リスクまたは任意改善として記録し、完了を妨げない。Minorや一般改善はblockingにしない。
+9. 追加修正後の再Trialは、未解決blocking finding、以前のdecisionまたはrisk dispositionを変え得るmaterial risk-surface delta、new material evidenceの影響領域だけをscopeにする。処置済みで未変更の領域とnonblocking Minorは再Trialしない。
 10. 最終reportは判断、根拠、finding disposition、検証済み/未検証範囲、残リスクを返す。
 
 ## 判断
 
 - `accept`: success criteriaを満たし、重要findingとblockerがない
 - `accept_with_risks`: 成果は満たすが明示すべき残リスクがある
-- `request_changes`: Critical/Major、成果未達、または実益が明確な修正が必要
+- `request_changes`: 未達fixed success criterion、authority／scope／safety invariant違反、対象検証を妨げるfailed validation、または再現可能なevidenceを伴うCritical/Majorがある
 - `needs_human`: scope/authority拡張、外部状態、本番・課金・認可など人間判断が必要
 - `blocked`: 必須根拠または安全な検証経路がない
 

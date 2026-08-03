@@ -24,6 +24,7 @@ EXPECTED_FIXTURES = {
     "guild_quest_routing.yaml",
     "ledger_injection_negative.yaml",
     "mapmaking_readonly_no_edit.yaml",
+    "overdesign_convergence_trial.yaml",
     "party_integration_barrier_stable_revision.yaml",
     "root_coordination_only.yaml",
     "safety_approval_scope_absolute_deny.yaml",
@@ -225,6 +226,59 @@ def validate_golden_quests() -> None:
         require(binding.get(key) == revision_input.get(key), f"revision binding {key} が input と一致しません。")
     require(binding.get("stale_evidence_outcome") == "stop" and binding.get("revision_change_requires_rerun") is True, "stale Trial evidence は停止・再実行してください。")
     _forbidden(revision.get("forbidden"), "revision.forbidden")
+
+    # A remediated Major closes unless evidence changes the decision; new contract surface does not join the loop.
+    convergence = _expected("overdesign_convergence_trial.yaml")
+    gate = mapping(convergence.get("terminal_convergence_gate"), "convergence.terminal_convergence_gate")
+    require(gate.get("owner") == "design_owner" and gate.get("uses_existing_skill") == "refine-design-plan", "design terminal convergence gate は既存refine-design-planをdesign ownerが使ってください。")
+    require(gate.get("before_handoff") is True and gate.get("terminal") is True, "design terminal convergence gate はhandoff前にterminalでなければなりません。")
+    require(sequence(gate.get("element_support_required"), "convergence.element_support_required") == ["fixed_success_criterion", "concrete_risk_mitigation_with_observed_evidence"], "設計要素はfixed criterionまたは観測根拠付きrisk mitigationへ対応付けてください。")
+    require(gate.get("unsupported_elements") == "remove_or_send_to_separate_contract", "根拠のない設計要素は削除または別contractへ送ってください。")
+    decisions = mapping(convergence.get("trial_disposition_cases"), "convergence.trial_disposition_cases")
+    remediated = mapping(decisions.get("remediated_major_without_new_evidence"), "convergence.remediated_major_without_new_evidence")
+    require(remediated.get("major_finding") == "remediated_with_evidence", "Major修正にはevidenceが必要です。")
+    require(remediated.get("new_material_evidence") is False and remediated.get("material_risk_surface_delta") is False, "新しいevidenceやmaterial deltaがない修正済みMajorを再開しないでください。")
+    require(remediated.get("outcome") in {"accept", "accept_with_risks"} and remediated.get("retrial_allowed") is False, "根拠付きMajorの修正後にnew material evidenceがなければaccept/accept_with_risksで閉じてください。")
+    require(sequence(remediated.get("retrial_scope"), "convergence.remediated_major_without_new_evidence.retrial_scope") == [], "処置済みで未変更の領域を再Trialしないでください。")
+    blocking = mapping(decisions.get("unresolved_major"), "convergence.unresolved_major")
+    require(blocking.get("trigger") == "unresolved_blocking_finding" and blocking.get("unresolved_major") is True, "未解決Majorはblocking findingとして扱ってください。")
+    require(blocking.get("blocking") is True and blocking.get("outcome") == "request_changes" and blocking.get("close_allowed") is False, "未解決MajorはTrialを閉じないでください。")
+    blocking_areas = sequence(blocking.get("affected_areas"), "convergence.unresolved_major.affected_areas")
+    blocking_scope = sequence(blocking.get("retrial_scope"), "convergence.unresolved_major.retrial_scope")
+    require(blocking.get("retrial_allowed") is True and blocking_areas == ["instruction_contract"] and blocking_scope == blocking_areas, "未解決blocking findingの再Trial scopeはその影響領域だけにしてください。")
+    require(blocking.get("next_action") == "rerun_focused_trial", "未解決blocking findingはそのfocusだけを再Trialしてください。")
+    safety_violation = mapping(decisions.get("safety_invariant_violation"), "convergence.safety_invariant_violation")
+    require(safety_violation.get("safety_invariant_violation") is True and safety_violation.get("blocking") is True, "safety invariant違反はblockingにしてください。")
+    require(safety_violation.get("outcome") == "request_changes" and safety_violation.get("close_allowed") is False, "safety invariant違反はTrialを閉じないでください。")
+    failed_validation = mapping(decisions.get("relevant_failed_validation"), "convergence.relevant_failed_validation")
+    require(failed_validation.get("relevant_failed_validation") is True and failed_validation.get("blocking") is True, "対象検証を妨げるfailed validationはblockingにしてください。")
+    require(failed_validation.get("outcome") == "request_changes" and failed_validation.get("close_allowed") is False, "対象検証を妨げるfailed validationはTrialを閉じないでください。")
+    minor = mapping(decisions.get("unresolved_nonblocking_minor"), "convergence.unresolved_nonblocking_minor")
+    require(minor.get("trigger") == "nonblocking_minor" and minor.get("blocking") is False, "未解決Minorをblocking findingとして扱わないでください。")
+    require(minor.get("retrial_allowed") is False and sequence(minor.get("retrial_scope"), "convergence.unresolved_nonblocking_minor.retrial_scope") == [], "nonblocking Minorで再Trialしないでください。")
+    require(minor.get("outcome") in {"accept", "accept_with_risks"} and minor.get("next_action") == "record_optional_improvement", "nonblocking Minorは任意改善として記録してください。")
+    for case_name, trigger, affected_area in (
+        ("material_risk_surface_delta", "material_risk_surface_delta", "authorization_boundary"),
+        ("new_material_evidence", "new_material_evidence", "validation_adapter"),
+    ):
+        retrial = mapping(decisions.get(case_name), f"convergence.{case_name}")
+        require(retrial.get("trigger") == trigger and retrial.get("retrial_allowed") is True, f"{trigger}は再Trialを開始してください。")
+        affected = sequence(retrial.get("affected_areas"), f"convergence.{case_name}.affected_areas")
+        scope = sequence(retrial.get("retrial_scope"), f"convergence.{case_name}.retrial_scope")
+        require(affected == [affected_area] and scope == affected, f"{trigger}の再Trial scopeは影響領域だけにしてください。")
+        require(retrial.get("outcome") == "retrial" and retrial.get("next_action") == "rerun_focused_trial", f"{trigger}はfocused Trialを再実行してください。")
+    for case_name, changed_field in (
+        ("new_success_criterion", "new_success_criteria"),
+        ("new_scope", "new_scope"),
+        ("new_authority", "new_authority"),
+    ):
+        new_contract = mapping(decisions.get(case_name), f"convergence.{case_name}")
+        require(new_contract.get(changed_field) is True, f"{case_name}の追加をfixtureで明示してください。")
+        for other_field in {"new_success_criteria", "new_scope", "new_authority"} - {changed_field}:
+            require(new_contract.get(other_field) is False, f"{case_name}は他のcontract surfaceを同時に追加しないでください。")
+        require(new_contract.get("same_loop_addition_allowed") is False, f"{case_name}を同じloopへ追加しないでください。")
+        require(new_contract.get("outcome") == "needs_human" and new_contract.get("next_action") == "new_task_contract", f"{case_name}はneeds_human/new task contractへ戻してください。")
+    _forbidden(convergence.get("forbidden"), "convergence.forbidden")
 
     # Independent review is risk-triggered, bounded, read-only and non-decision.
     risk_trial = _expected("focused_trial_risk_triggered_review.yaml")
