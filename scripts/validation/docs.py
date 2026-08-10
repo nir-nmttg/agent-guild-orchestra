@@ -28,11 +28,11 @@ EXPECTED_AGENT_SANDBOX_MODES = {
 }
 
 EXPECTED_AGENT_MODEL_CONFIGS = {
-    "adventurer": ("gpt-5.6-terra", "high"),
-    "sage": ("gpt-5.6-luna", "xhigh"),
+    "adventurer": ("gpt-5.6-luna", "max"),
+    "sage": ("gpt-5.6-luna", "max"),
     "cartographer": ("gpt-5.6-sol", "high"),
-    "courier": ("gpt-5.3-codex-spark", "xhigh"),
-    "examiner": ("gpt-5.6-terra", "high"),
+    "courier": ("gpt-5.3-codex-spark", "high"),
+    "examiner": ("gpt-5.6-luna", "max"),
     "guildmaster": ("gpt-5.6-sol", "xhigh"),
     "inquisitor": ("gpt-5.6-sol", "xhigh"),
     "artificer": ("gpt-5.6-sol", "high"),
@@ -292,7 +292,7 @@ def _markdown_h2_section(rel: str, text: str, heading: str) -> str:
 
 def _validate_current_deployment_docs() -> None:
     readme = _markdown_h2_section("README.md", read("README.md"), "仕組み")
-    for token in ("`sage`はLuna/xhigh", "`inquisitor`はSol/xhigh"):
+    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはSpark/high"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
     changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.0.0] - 2026-07-26")
@@ -308,24 +308,30 @@ def _validate_current_deployment_docs() -> None:
     require("job_max_runtime_seconds = 2400" in configuration, "agent-deployment.md の現行job runtimeは2400秒にしてください。")
     deployment_pairs = _markdown_h2_section("docs/agent-deployment.md", deployment_text, "Deployment role pairs")
     for row in (
-        "| `sage` | `gpt-5.6-luna` | `read-only` | `xhigh` |",
+        "| `adventurer` | `gpt-5.6-luna` | `workspace-write` | `max` |",
+        "| `sage` | `gpt-5.6-luna` | `read-only` | `max` |",
+        "| `examiner` | `gpt-5.6-luna` | `read-only` | `max` |",
+        "| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `high` |",
         "| `inquisitor` | `gpt-5.6-sol` | `read-only` | `xhigh` |",
     ):
         require(row in deployment_pairs, f"agent-deployment.md の現行role pair表に `{row}` が必要です。")
-    for token in ("`sage`はLuna/xhigh", "`inquisitor`はSol/xhigh"):
+    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "Courierは5.3-Spark/high"):
         require(token in deployment_pairs, f"agent-deployment.md の現行pair説明に `{token}` が必要です。")
 
     selection_text = read("docs/model-selection-evaluation.md")
     fixed_matrix = _markdown_h2_section("docs/model-selection-evaluation.md", selection_text, "固定マトリクス")
     for row in (
-        "| `sage` | `gpt-5.6-luna` | `xhigh` |",
+        "| `adventurer` | `gpt-5.6-luna` | `max` |",
+        "| `sage` | `gpt-5.6-luna` | `max` |",
+        "| `examiner` | `gpt-5.6-luna` | `max` |",
+        "| `courier` | `gpt-5.3-codex-spark` | `high` |",
         "| `inquisitor` | `gpt-5.6-sol` | `xhigh` |",
         "| `inquisitor` | Sol `xhigh` / Sol `high` |",
-        "| `sage` | Luna `xhigh` / Terra `xhigh` / Sol `xhigh`",
-        "別dimensionの診断用effort challengerはLuna `high`",
+        "| `sage` | Luna `max` / Terra `max` / Sol `max`",
+        "別dimensionの診断用effort challengerはLuna `xhigh`",
     ):
         require(row in fixed_matrix, f"model-selection-evaluation.md の現行固定マトリクスに `{row}` が必要です。")
-    for token in ("`sage`のみxhighでLuna/Terra/Solを比べます", "`inquisitor`はSol/xhighをdeploymentへ固定"):
+    for token in ("`adventurer`、`sage`、`examiner`はmaxでLuna/Terra/Solを比べます", "`inquisitor`はSol/xhighをdeploymentへ固定", "live比較による品質・コストの実証ではありません"):
         require(token in selection_text, f"model-selection-evaluation.md の現行evaluation説明に `{token}` が必要です。")
 
 

@@ -22,7 +22,7 @@ job_max_runtime_seconds = 2400
 
 clean installと通常の再installはいずれもproject-local `model_reasoning_effort`を出力しません。導入先に旧指定があれば再install時に除去し、reasoning effortの選択はsession/global/user設定へ委ねます。installerやorchestrationはeffortを自動選択しません。`ultra`がproactiveに委譲する場合も、Root→named top-level roleと`inquisitor`→`examiner`以外の辺、depth、authorityを追加しません。
 
-`job_max_runtime_seconds=2400`は、xhighのSage助言とTrial判断が中途で打ち切られないためのjob単位の有界timeoutです。並列数、総spawn数、token、costの上限は変更しません。
+`job_max_runtime_seconds=2400`は、maxの作業担当やxhighのTrial判断が中途で打ち切られないためのjob単位の有界timeoutです。並列数、総spawn数、token、costの上限は変更しません。
 
 `workspace-write` agentの外部通信は有効です。外部通信を伴うコマンドも`approval_policy = "on-request"`と実行環境の承認境界に従います。
 
@@ -33,20 +33,20 @@ clean installと通常の再installはいずれもproject-local `model_reasoning
 | agent | model | sandbox | reasoning | responsibility |
 | --- | --- | --- | --- | --- |
 | Root | `gpt-5.6-sol` | `read-only` | project-local未指定。利用者が`high / xhigh / ultra`を選択 | control-plane確認、routing、evidence gate、次action、最終統合 |
-| `adventurer` | `gpt-5.6-terra` | `workspace-write` | `high` | 一つのbounded scopeの調査、実装、検証 |
+| `adventurer` | `gpt-5.6-luna` | `workspace-write` | `max` | 一つのbounded scopeの調査、実装、検証 |
 | `artificer` | `gpt-5.6-sol` | `workspace-write` | `high` | 共有契約、cross-scope glue、統合検証 |
-| `sage` | `gpt-5.6-luna` | `read-only` | `xhigh` | 具体的な独立focusの助言 |
+| `sage` | `gpt-5.6-luna` | `read-only` | `max` | 具体的な独立focusの助言 |
 | `cartographer` | `gpt-5.6-sol` | `read-only` | `high` | read-only mapmaking |
-| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `xhigh` | Ledgerと、境界固定assignmentの可逆local Git操作を行う唯一のGit write owner |
-| `examiner` | `gpt-5.6-terra` | `read-only` | `high` | 単一focusのbounded review evidence |
+| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `high` | Ledgerと、境界固定assignmentの可逆local Git操作を行う唯一のGit write owner |
+| `examiner` | `gpt-5.6-luna` | `read-only` | `max` | 単一focusのbounded review evidence |
 | `guildmaster` | `gpt-5.6-sol` | `read-only` | `xhigh` | 複数Partyの広域戦略 |
 | `inquisitor` | `gpt-5.6-sol` | `read-only` | `xhigh` | Trial、finding統合、最終decision |
 | `captain` | `gpt-5.6-sol` | `read-only` | `high` | scope、順序、integration、Trial設計 |
 | `warden` | `gpt-5.6-sol` | `read-only` | `high` | 例外的な制御診断 |
 
-deploymentは、decision authority、blast radius、scopeのboundedness、ownerによる再検証可能性から固定しています。高頻度で単一scopeを実装・検証する`adventurer`と、単一focusのevidenceだけを返す`examiner`はTerra/highです。狭いfocusでもarchitectureやsafetyの考慮漏れをownerが完全に再現できない`sage`はLuna/xhigh、Trialの最終採否と重大度統合を持つ`inquisitor`はSol/xhighとします。未知領域のomissionが下流へ波及する`cartographer`、scopeと共有契約を設計・統合する`captain` / `artificer`、例外時だけ難しい診断を行う`warden`はSol/highを維持し、最大blast radiusを持つ`guildmaster`はSol/xhighです。Courierは従来どおり5.3-Spark/xhighを維持します。
+deploymentは、設計・最終判断と実作業の責務境界に沿って固定しています。bounded implementation、独立focusの助言、bounded review evidenceを担う`adventurer`、`sage`、`examiner`はLuna/maxです。Trialの最終採否と重大度統合を持つ`inquisitor`はSol/xhighとします。未知領域のomissionが下流へ波及する`cartographer`、scopeと共有契約を設計・統合する`captain` / `artificer`、例外時だけ難しい診断を行う`warden`はSol/highを維持し、最大blast radiusを持つ`guildmaster`はSol/xhighです。Courierは5.3-Spark/highです。この変更はLunaの低コスト特性を活用する明示的なconfiguration choiceであり、新しいlive比較により品質や総コストの改善を実証した結果ではありません。
 
-subagentのreasoning effortはroleごとに固定し、実行中に動的変更しません。deployment pairに対するstronger / alternative challengerはmodel-selection evalで比較できますが、実行中の自動切替には使いません。`max`と`ultra`は全subagentから除外します。Rootのcomponent referenceはhighですが、runtime templateへはpinせず、high/xhigh/ultraを利用者が選びます。
+subagentのreasoning effortはroleごとに固定し、実行中に動的変更しません。deployment pairに対するalternative challengerはmodel-selection evalで比較できますが、実行中の自動切替には使いません。`max`は`adventurer`、`sage`、`examiner`だけに固定し、`ultra`は全subagentから除外します。Rootのcomponent referenceはhighですが、runtime templateへはpinせず、high/xhigh/ultraを利用者が選びます。
 
 ## Guild role naming
 
@@ -147,9 +147,9 @@ make validate
 validatorは次を確認します。
 
 - Root modelはSol、reasoning effortはproject-local未指定、利用者選択はhigh/xhigh/ultra（component referenceのhighとは分離）
-- deployment pairとchallengerの分離、およびsubagentのmax/ultra禁止
+- deployment pairとchallengerの分離、3 roleだけのmax固定、および全subagentのultra禁止
 - Rootのcoordination-only境界と、ultraを含むnamed-role topology
-- Courier Spark/xhighの維持
+- Courier Spark/highの固定
 - inquisitorだけのnested capabilityと、その他custom agentのterminal設定
 - `max_threads=64`、`max_depth=2`、`job_max_runtime_seconds=2400`
 - 全10 roleの`max_parallel`合計48、非adventurer合計16、`adventurer.max_parallel=32`、未割当headroom 16

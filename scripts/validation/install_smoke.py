@@ -46,7 +46,10 @@ EXPECTED_AGENT_FILES = {
     "warden.toml",
 }
 EXPECTED_UPDATED_AGENT_PAIRS = {
-    "sage": ("gpt-5.6-luna", "xhigh"),
+    "adventurer": ("gpt-5.6-luna", "max"),
+    "sage": ("gpt-5.6-luna", "max"),
+    "examiner": ("gpt-5.6-luna", "max"),
+    "courier": ("gpt-5.3-codex-spark", "high"),
     "inquisitor": ("gpt-5.6-sol", "xhigh"),
 }
 EXPECTED_SKILL_DIRS = {
@@ -489,9 +492,7 @@ def validate_install_upgrade_smoke() -> None:
         INSTALLER.yaml = original_yaml
     require(fallback_root_model == "gpt-5.6-sol", "install.py のPyYAMLなしfallbackでもRoot model policyを読めるようにしてください。")
     require(
-        fallback_pairs.get("adventurer") == ("gpt-5.6-terra", "high")
-        and all(fallback_pairs.get(role) == pair for role, pair in EXPECTED_UPDATED_AGENT_PAIRS.items())
-        and fallback_pairs.get("courier") == ("gpt-5.3-codex-spark", "xhigh"),
+        all(fallback_pairs.get(role) == pair for role, pair in EXPECTED_UPDATED_AGENT_PAIRS.items()),
         "install.py のPyYAMLなしfallbackでも固定subagent pairを保持してください。",
     )
 
@@ -1005,12 +1006,12 @@ def validate_install_upgrade_smoke() -> None:
 
     def drift_settings_adventurer_pair(source: Path) -> None:
         path = source / ".agents/orchestra/config/settings.yaml"
-        old = "    adventurer: {model: gpt-5.6-terra, model_reasoning_effort: high}"
-        new = "    adventurer: {model: gpt-5.6-sol, model_reasoning_effort: high}"
+        old = "    adventurer: {model: gpt-5.6-luna, model_reasoning_effort: max}"
+        new = "    adventurer: {model: gpt-5.6-sol, model_reasoning_effort: max}"
         path.write_text(path.read_text(encoding="utf-8").replace(old, new, 1), encoding="utf-8")
 
     stale_model_policy = run_with_mutated_source("settings adventurer pair drift", drift_settings_adventurer_pair)
-    require("adventurer" in (stale_model_policy.stdout + stale_model_policy.stderr) and "gpt-5.6-terra" in (stale_model_policy.stdout + stale_model_policy.stderr), "install.py preflightはsettings model pair driftを拒否してください。")
+    require("adventurer" in (stale_model_policy.stdout + stale_model_policy.stderr) and "gpt-5.6-luna" in (stale_model_policy.stdout + stale_model_policy.stderr), "install.py preflightはsettings model pair driftを拒否してください。")
 
     def drift_queue_schema_contract(source: Path) -> None:
         path = source / ".agents/orchestra/scripts/queue_schema.sql"

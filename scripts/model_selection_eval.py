@@ -225,9 +225,9 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     if (
         any(not isinstance(value, str) for value in subagent_allowed_efforts)
         or len(subagent_allowed_efforts) != len(set(subagent_allowed_efforts))
-        or set(subagent_allowed_efforts) != {"high", "xhigh"}
+        or set(subagent_allowed_efforts) != {"high", "xhigh", "max"}
     ):
-        raise EvalConfigError("Subagent reasoning effort は high / xhigh の固定 pairだけを許可してください。")
+        raise EvalConfigError("Subagent reasoning effort は high / xhigh / max の固定 pairだけを許可してください。")
     if policy.get("migration_same_effort_comparison_required") is not True:
         raise EvalConfigError("migration same-effort comparison を必須にしてください。")
     if policy.get("phase_one_reasoning_floor") != "high":
@@ -275,7 +275,7 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         or any(effort not in subagent_allowed_efforts for effort in model_tier_effort_overrides.values())
         or any(effort == policy["model_tier_comparison_effort"] for effort in model_tier_effort_overrides.values())
     ):
-        raise EvalConfigError("model tier effort overrideはrole別の非冗長なhigh/xhigh指定にしてください。")
+        raise EvalConfigError("model tier effort overrideはrole別の非冗長なhigh/xhigh/max指定にしてください。")
     reasoning_comparison_efforts = _sequence(
         policy.get("reasoning_comparison_efforts"),
         "selection_policy.reasoning_comparison_efforts",
@@ -466,8 +466,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             if fixed["effort"] not in subagent_allowed_efforts:
                 raise EvalConfigError(f"roles.{role}.fixed_pair effortはsubagent allowed effortsから選んでください。")
             if role == "courier":
-                if fixed != {"model": "gpt-5.3-codex-spark", "effort": "xhigh"}:
-                    raise EvalConfigError("roles.courier.fixed_pair は現状のSpark/xhighを維持してください。")
+                if fixed != {"model": "gpt-5.3-codex-spark", "effort": "high"}:
+                    raise EvalConfigError("roles.courier.fixed_pair はSpark/highにしてください。")
             elif fixed["model"] not in component_model_catalog:
                 raise EvalConfigError(f"roles.{role}.fixed_pair はcomponent model catalogから選んでください。")
             continue
@@ -574,10 +574,19 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             regression_pair = _validate_pair(regression, f"roles.{role}.regression_control")
             if regression_pair["model"] != "gpt-5.5":
                 raise EvalConfigError(f"roles.{role}.regression_control は gpt-5.5 にしてください。")
-            if not any(
+            same_effort_candidate_exists = any(
                 pair["model"] == selected["model"] and pair["effort"] == regression_pair["effort"]
                 for pair in normalized_candidates
-            ):
+            )
+            regression_basis = role_data.get("regression_control_basis")
+            max_migration_exception = (
+                selected["effort"] == "max"
+                and regression_pair["effort"] == "high"
+                and isinstance(regression_basis, str)
+                and "legacy regression control" in regression_basis
+                and "deployment推薦とは分離" in regression_basis
+            )
+            if not same_effort_candidate_exists and not max_migration_exception:
                 raise EvalConfigError(f"roles.{role} は selected modelでregression controlと同じeffortの候補を含めてください。")
         if len(role_cases) < 2:
             raise EvalConfigError(f"roles.{role}.cases は typical / edge の2件以上にしてください。")

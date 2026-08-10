@@ -164,13 +164,13 @@ def validate_settings() -> None:
         "cartographer": ("gpt-5.6-sol", "high"),
         "guildmaster": ("gpt-5.6-sol", "xhigh"),
         "captain": ("gpt-5.6-sol", "high"),
-        "adventurer": ("gpt-5.6-terra", "high"),
+        "adventurer": ("gpt-5.6-luna", "max"),
         "artificer": ("gpt-5.6-sol", "high"),
         "inquisitor": ("gpt-5.6-sol", "xhigh"),
-        "examiner": ("gpt-5.6-terra", "high"),
-        "sage": ("gpt-5.6-luna", "xhigh"),
+        "examiner": ("gpt-5.6-luna", "max"),
+        "sage": ("gpt-5.6-luna", "max"),
         "warden": ("gpt-5.6-sol", "high"),
-        "courier": ("gpt-5.3-codex-spark", "xhigh"),
+        "courier": ("gpt-5.3-codex-spark", "high"),
     }
     pairs = mapping(model_policy.get("subagent_pairs"), "settings.model_policy.subagent_pairs")
     require(set(pairs) == set(expected_pairs), "settings.model_policy.subagent_pairs は定義済みの10 roleだけにしてください。")
