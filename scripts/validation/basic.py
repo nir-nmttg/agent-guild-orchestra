@@ -1,4 +1,4 @@
-"""repository 全体の基本検証。"""
+2.2.0"""repository 全体の基本検証。"""
 
 from __future__ import annotations
 
@@ -278,7 +278,7 @@ def validate_version() -> None:
     version = read("VERSION").strip()
     parts = version.split(".")
     require(len(parts) == 3 and all(part.isdecimal() for part in parts), "VERSION は MAJOR.MINOR.PATCH 形式にしてください。")
-    require(version == "2.1.0", "この release contract の VERSION は 2.1.0 にしてください。")
+    require(version == "2.2.0", "この release contract の VERSION は 2.1.0 にしてください。")
     require(
         f"現在のバージョンは`{version}`" in read("README.md"),
         "README.md の現在バージョンを VERSION と同期してください。",
