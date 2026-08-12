@@ -1,4 +1,4 @@
-"""Prompt surface、agent config、docs、skills、hook の契約検証。"""
+[2.2.0] - 2026-08-13"""Prompt surface、agent config、docs、skills、hook の契約検証。"""
 
 from __future__ import annotations
 
@@ -295,11 +295,11 @@ def _validate_current_deployment_docs() -> None:
     for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはSpark/high"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
-    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.0.0] - 2026-07-26")
+    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更")
     for token in (
-        "`sage`をLuna/xhigh",
-        "`inquisitor`をSol/xhigh",
-        "`job_max_runtime_seconds`を1800秒から2400秒へ延長",
+        "`courier`のmodelは`gpt-5.3-codex-spark`のまま、reasoning effortを`xhigh`から`high`へ変更",
+        "新たなlive品質・コスト実証ではないことを明記",
+        "v2.2.0契約",
     ):
         require(token in changelog, f"CHANGELOG.md のv2.0.0契約に `{token}` が必要です。")
 
