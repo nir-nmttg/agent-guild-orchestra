@@ -1,4 +1,12 @@
-[2.2.0] - 2026-08-13"""Prompt surface、agent config、docs、skills、hook の契約検証。"""
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+python3: error: couldn't create cache file '/tmp/xcrun_db-29mzUUtp' (errno=Operation not permitted)
+2026-08-13 01:22:58.542 xcodebuild[28715:30775812]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-08-13 01:22:58.639 xcodebuild[28715:30775811] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+python3: error: couldn't create cache file '/tmp/xcrun_db-eVX4UWJQ' (errno=Operation not permitted)
+2026-08-13 01:22:58.938 xcodebuild[28719:30775822]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-08-13 01:22:59.035 xcodebuild[28719:30775821] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+"""Prompt surface、agent config、docs、skills、hook の契約検証。"""
 
 from __future__ import annotations
 
@@ -295,13 +303,14 @@ def _validate_current_deployment_docs() -> None:
     for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはSpark/high"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
-    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更")
+    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.2.0] - 2026-08-13")
     for token in (
+        "実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更",
+        "設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持",
         "`courier`のmodelは`gpt-5.3-codex-spark`のまま、reasoning effortを`xhigh`から`high`へ変更",
-        "新たなlive品質・コスト実証ではないことを明記",
-        "v2.2.0契約",
+        "installer、orchestration/model-selection eval、validator、deployment文書を新しい固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記",
     ):
-        require(token in changelog, f"CHANGELOG.md のv2.0.0契約に `{token}` が必要です。")
+        require(token in changelog, f"CHANGELOG.md のv2.2.0契約に `{token}` が必要です。")
 
     deployment_text = read("docs/agent-deployment.md")
     configuration = _markdown_h2_section("docs/agent-deployment.md", deployment_text, "Configuration")
