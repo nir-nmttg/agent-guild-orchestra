@@ -295,13 +295,14 @@ def _validate_current_deployment_docs() -> None:
     for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはSpark/high"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
-    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.0.0] - 2026-07-26")
+    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.2.0] - 2026-08-13")
     for token in (
-        "`sage`をLuna/xhigh",
-        "`inquisitor`をSol/xhigh",
-        "`job_max_runtime_seconds`を1800秒から2400秒へ延長",
+        "実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更",
+        "設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持",
+        "`courier`のmodelは`gpt-5.3-codex-spark`のまま、reasoning effortを`xhigh`から`high`へ変更",
+        "installer、orchestration/model-selection eval、validator、deployment文書を新しい固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記",
     ):
-        require(token in changelog, f"CHANGELOG.md のv2.0.0契約に `{token}` が必要です。")
+        require(token in changelog, f"CHANGELOG.md のv2.2.0契約に `{token}` が必要です。")
 
     deployment_text = read("docs/agent-deployment.md")
     configuration = _markdown_h2_section("docs/agent-deployment.md", deployment_text, "Configuration")
