@@ -1,11 +1,3 @@
-python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-python3: error: couldn't create cache file '/tmp/xcrun_db-29mzUUtp' (errno=Operation not permitted)
-2026-08-13 01:22:58.542 xcodebuild[28715:30775812]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-08-13 01:22:58.639 xcodebuild[28715:30775811] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
-python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
-python3: error: couldn't create cache file '/tmp/xcrun_db-eVX4UWJQ' (errno=Operation not permitted)
-2026-08-13 01:22:58.938 xcodebuild[28719:30775822]  DVTFilePathFSEvents: Failed to start fs event stream.
-2026-08-13 01:22:59.035 xcodebuild[28719:30775821] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
 """Prompt surface、agent config、docs、skills、hook の契約検証。"""
 
 from __future__ import annotations
