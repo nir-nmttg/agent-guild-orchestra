@@ -1,4 +1,12 @@
-"""repository 全体の基本検証。"""この release contract の VERSION は 2.2.0 にしてください。
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+python3: error: couldn't create cache file '/tmp/xcrun_db-rFoeW6OG' (errno=Operation not permitted)
+2026-08-13 01:22:33.125 xcodebuild[28670:30775126]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-08-13 01:22:33.264 xcodebuild[28670:30775125] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+python3: error: couldn't create cache file '/tmp/xcrun_db-iVUvx4MZ' (errno=Operation not permitted)
+2026-08-13 01:22:33.604 xcodebuild[28672:30775135]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-08-13 01:22:33.703 xcodebuild[28672:30775134] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+"""repository 全体の基本検証。"""
 
 from __future__ import annotations
 
@@ -278,7 +286,7 @@ def validate_version() -> None:
     version = read("VERSION").strip()
     parts = version.split(".")
     require(len(parts) == 3 and all(part.isdecimal() for part in parts), "VERSION は MAJOR.MINOR.PATCH 形式にしてください。")
-    require(version == "2.2.0", "この release contract の VERSION は 2.1.0 にしてください。")
+    require(version == "2.2.0", "この release contract の VERSION は 2.2.0 にしてください。")
     require(
         f"現在のバージョンは`{version}`" in read("README.md"),
         "README.md の現在バージョンを VERSION と同期してください。",
