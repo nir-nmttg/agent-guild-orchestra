@@ -1,4 +1,4 @@
-2.2.0"""repository 全体の基本検証。"""
+"""repository 全体の基本検証。"""この release contract の VERSION は 2.2.0 にしてください。
 
 from __future__ import annotations
 
