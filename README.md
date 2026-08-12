@@ -177,7 +177,7 @@ secret、token、credential、password、key、認証情報、PIIは読まず、
 - `Ledger`: 検証根拠と残リスクを記録するSQLite監査履歴
 - helper-issued snapshotとqueue lineageのfail-closedな検証
 
-数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。RootはSolに固定し、reasoning effortはproject-localへ固定せず、利用者が`high`、`xhigh`、`ultra`から選びます。どのmodeでもRootはnamed top-level assignmentだけを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。bounded implementationの`adventurer`とbounded reviewの`examiner`はTerra/high、独立focusの助言を返す`sage`はLuna/xhigh、Trialの最終decisionを持つ`inquisitor`はSol/xhighを使います。その他の広い判断・統合・例外診断を持つroleも、役割に必要十分なSol pairを維持します。Courierは従来どおりSpark/xhighです。
+数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。RootはSolに固定し、reasoning effortはproject-localへ固定せず、利用者が`high`、`xhigh`、`ultra`から選びます。どのmodeでもRootはnamed top-level assignmentだけを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。作業担当として位置付ける`adventurer`、`sage`、`examiner`はLuna/max、Trialの最終decisionを持つ`inquisitor`はSol/xhighを使います。その他の設計、広い判断、統合、例外診断を持つroleは既存のSol pairを維持します。CourierはSpark/highです。この割り当てはLunaの低コスト特性を活用する明示的な構成選択であり、このリポジトリで新たに取得したlive比較による品質・コストの実証ではありません。
 
 利用例は[ユースケース集](docs/use-cases/README.md)、設計の詳細は[orchestration runtime](docs/orchestration-runtime.md)と[agent deployment](docs/agent-deployment.md)、モデル選択の方針は[モデル選択評価](docs/model-selection-evaluation.md)を参照してください。
 

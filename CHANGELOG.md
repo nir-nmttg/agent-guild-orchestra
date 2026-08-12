@@ -4,7 +4,12 @@
 
 ## [Unreleased]
 
-現在、記録対象の変更はありません。
+### 変更
+
+- 実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更
+- 設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持
+- `courier`のmodelは`gpt-5.3-codex-spark`のまま、reasoning effortを`xhigh`から`high`へ変更
+- installer、orchestration/model-selection eval、validator、deployment文書を新しい固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記
 
 ## [2.1.0] - 2026-08-03
 

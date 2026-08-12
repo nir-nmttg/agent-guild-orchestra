@@ -13,7 +13,7 @@ selection_policy:
   fixed_pair_per_subagent: true
   dynamic_effort_allowed: false
   component_model_catalog: [gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna]
-  subagent_allowed_efforts: [high, xhigh]
+  subagent_allowed_efforts: [high, xhigh, max]
   root_user_configurable_effort: true
   root_runtime_effort_pinned: false
   root_allowed_modes: [high, xhigh, ultra]
@@ -23,7 +23,7 @@ selection_policy:
   component_eval_multi_agent: false
   phase_one_reasoning_floor: high
   model_tier_comparison_effort: high
-  model_tier_comparison_effort_overrides: {sage: xhigh}
+  model_tier_comparison_effort_overrides: {adventurer: max, sage: max, examiner: max}
   reasoning_comparison_efforts: [high, xhigh]
   root_component_comparison_roles: [root]
   model_tier_comparison_roles: [adventurer, sage, cartographer, examiner, warden]
@@ -155,23 +155,25 @@ roles:
     sandbox: workspace-write
     cases: [solo_csv_fix, adventurer_scope_escalation]
     regression_control: {model: gpt-5.5, effort: high}
-    selected_pair: {model: gpt-5.6-terra, effort: high}
+    regression_control_basis: "gpt-5.5はmax非対応のため、旧deploymentのhighをlegacy regression controlとして保持し、deployment推薦とは分離する"
+    selected_pair: {model: gpt-5.6-luna, effort: max}
     candidates:
-      - {model: gpt-5.6-terra, effort: high}
-      - {model: gpt-5.6-sol, effort: high}
+      - {model: gpt-5.6-luna, effort: max}
+      - {model: gpt-5.6-terra, effort: max}
+      - {model: gpt-5.6-sol, effort: max}
   sage:
     sandbox: read-only
     cases: [sage_nullable_migration, sage_contract_duplication]
-    selected_pair: {model: gpt-5.6-luna, effort: xhigh}
+    selected_pair: {model: gpt-5.6-luna, effort: max}
     candidates:
-      - {model: gpt-5.6-luna, effort: xhigh}
-      - {model: gpt-5.6-terra, effort: xhigh}
-      - {model: gpt-5.6-sol, effort: xhigh}
+      - {model: gpt-5.6-luna, effort: max}
+      - {model: gpt-5.6-terra, effort: max}
+      - {model: gpt-5.6-sol, effort: max}
     supplemental_effort_comparison:
       recommendation_authority: diagnostic_only
-      reference_pair: {model: gpt-5.6-luna, effort: xhigh}
+      reference_pair: {model: gpt-5.6-luna, effort: max}
       challenger_pairs:
-        - {model: gpt-5.6-luna, effort: high}
+        - {model: gpt-5.6-luna, effort: xhigh}
   cartographer:
     sandbox: read-only
     cases: [mapmaking_session_rotation, mapmaking_local_refactor]
@@ -204,10 +206,11 @@ roles:
   examiner:
     sandbox: read-only
     cases: [bounded_focus_review, bounded_focus_regression]
-    selected_pair: {model: gpt-5.6-terra, effort: high}
+    selected_pair: {model: gpt-5.6-luna, effort: max}
     candidates:
-      - {model: gpt-5.6-terra, effort: high}
-      - {model: gpt-5.6-sol, effort: high}
+      - {model: gpt-5.6-luna, effort: max}
+      - {model: gpt-5.6-terra, effort: max}
+      - {model: gpt-5.6-sol, effort: max}
   captain:
     sandbox: read-only
     cases: [party_notification_channels, party_scope_collision]
@@ -226,7 +229,7 @@ roles:
     sandbox: workspace-write
     cases: [courier_explicit_commit_scope]
     selection_excluded: true
-    fixed_pair: {model: gpt-5.3-codex-spark, effort: xhigh}
+    fixed_pair: {model: gpt-5.3-codex-spark, effort: high}
     exclusion_reason: "Sparkは別usage limitのresearch previewで5.6 familyのcost比較対象外"
 
 cases:

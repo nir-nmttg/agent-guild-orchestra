@@ -64,16 +64,16 @@ def validate_model_selection_eval() -> None:
     )
     expected_pairs = {
         "root": {"model": "gpt-5.6-sol", "effort": "high"},
-        "adventurer": {"model": "gpt-5.6-terra", "effort": "high"},
-        "sage": {"model": "gpt-5.6-luna", "effort": "xhigh"},
+        "adventurer": {"model": "gpt-5.6-luna", "effort": "max"},
+        "sage": {"model": "gpt-5.6-luna", "effort": "max"},
         "cartographer": {"model": "gpt-5.6-sol", "effort": "high"},
         "guildmaster": {"model": "gpt-5.6-sol", "effort": "xhigh"},
         "inquisitor": {"model": "gpt-5.6-sol", "effort": "xhigh"},
         "artificer": {"model": "gpt-5.6-sol", "effort": "high"},
-        "examiner": {"model": "gpt-5.6-terra", "effort": "high"},
+        "examiner": {"model": "gpt-5.6-luna", "effort": "max"},
         "captain": {"model": "gpt-5.6-sol", "effort": "high"},
         "warden": {"model": "gpt-5.6-sol", "effort": "high"},
-        "courier": {"model": "gpt-5.3-codex-spark", "effort": "xhigh"},
+        "courier": {"model": "gpt-5.3-codex-spark", "effort": "high"},
     }
     for role, value in roles.items():
         role_data = mapping(value, f"model_selection.roles.{role}")
@@ -85,6 +85,15 @@ def validate_model_selection_eval() -> None:
         agent = tomllib.loads(read(f"template/.codex/agents/{role}.toml"))
         require(selected == {"model": agent.get("model"), "effort": agent.get("model_reasoning_effort")}, f"manifest {role} {pair_key} を actual agent config と一致させてください。")
 
+    adventurer_role = mapping(roles.get("adventurer"), "model_selection.roles.adventurer")
+    require(
+        mapping(adventurer_role.get("regression_control"), "model_selection.roles.adventurer.regression_control")
+        == {"model": "gpt-5.5", "effort": "high"}
+        and "legacy regression control" in str(adventurer_role.get("regression_control_basis"))
+        and "deployment推薦とは分離" in str(adventurer_role.get("regression_control_basis")),
+        "Adventurerの旧5.5/high evidenceはdeployment推薦と分離したlegacy regression controlとして保持してください。",
+    )
+
     sage_role = mapping(roles.get("sage"), "model_selection.roles.sage")
     sage_primary_candidates = [
         mapping(value, "model_selection.roles.sage.candidate")
@@ -93,11 +102,11 @@ def validate_model_selection_eval() -> None:
     require(
         {(value.get("model"), value.get("effort")) for value in sage_primary_candidates}
         == {
-            ("gpt-5.6-luna", "xhigh"),
-            ("gpt-5.6-terra", "xhigh"),
-            ("gpt-5.6-sol", "xhigh"),
+            ("gpt-5.6-luna", "max"),
+            ("gpt-5.6-terra", "max"),
+            ("gpt-5.6-sol", "max"),
         },
-        "Sage model-tier候補はLuna/Terra/Solのsame-effort xhigh比較にしてください。",
+        "Sage model-tier候補はLuna/Terra/Solのsame-effort max比較にしてください。",
     )
     sage_supplemental = mapping(
         sage_role.get("supplemental_effort_comparison"),
@@ -107,18 +116,18 @@ def validate_model_selection_eval() -> None:
         sage_supplemental
         == {
             "recommendation_authority": "diagnostic_only",
-            "reference_pair": {"model": "gpt-5.6-luna", "effort": "xhigh"},
-            "challenger_pairs": [{"model": "gpt-5.6-luna", "effort": "high"}],
+            "reference_pair": {"model": "gpt-5.6-luna", "effort": "max"},
+            "challenger_pairs": [{"model": "gpt-5.6-luna", "effort": "xhigh"}],
         },
-        "Sage supplemental effort比較はLuna/xhigh reference対Luna/high challengerだけにしてください。",
+        "Sage supplemental effort比較はLuna/max reference対Luna/xhigh challengerだけにしてください。",
     )
     sage_execution_pairs = module._candidate_list(sage_role, include_regression=False)
     require(
         any(
-            value == {"model": "gpt-5.6-luna", "effort": "high", "source": "effort_challenger"}
+            value == {"model": "gpt-5.6-luna", "effort": "xhigh", "source": "effort_challenger"}
             for value in sage_execution_pairs
         ),
-        "runnerはSage Luna/highを独立したeffort challengerとして実行matrixへ含めてください。",
+        "runnerはSage Luna/xhighを独立したeffort challengerとして実行matrixへ含めてください。",
     )
 
     text = read("scripts/model_selection_eval.yaml")
@@ -126,7 +135,7 @@ def validate_model_selection_eval() -> None:
         "fixed_pair_per_subagent: true",
         "dynamic_effort_allowed: false",
         "component_model_catalog: [gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna]",
-        "subagent_allowed_efforts: [high, xhigh]",
+        "subagent_allowed_efforts: [high, xhigh, max]",
         "root_user_configurable_effort: true",
         "root_runtime_effort_pinned: false",
         "root_allowed_modes: [high, xhigh, ultra]",
@@ -137,7 +146,7 @@ def validate_model_selection_eval() -> None:
         "ultra_in_scope: true",
         "phase_one_reasoning_floor: high",
         "model_tier_comparison_effort: high",
-        "model_tier_comparison_effort_overrides: {sage: xhigh}",
+        "model_tier_comparison_effort_overrides: {adventurer: max, sage: max, examiner: max}",
         "supplemental_effort_comparison:",
         "recommendation_authority: diagnostic_only",
         "reasoning_comparison_efforts: [high, xhigh]",
@@ -454,7 +463,7 @@ def validate_model_selection_eval() -> None:
         compact_candidates = summary.get("model_effort_recommendations_by_prompt_profile", {}).get("compact", {}).get("candidate_pairs", [])
         require(all(not str(pair).startswith("gpt-5.5") for pair in compact_candidates), "regression controlをdeployment推薦候補へ含めないでください。")
         require(
-            "gpt-5.6-luna/high" not in compact_candidates,
+            "gpt-5.6-luna/xhigh" not in compact_candidates,
             "diagnostic-onlyのSage effort challengerをdeployment推薦候補へ含めないでください。",
         )
         supplemental_comparisons = sequence(
@@ -466,9 +475,9 @@ def validate_model_selection_eval() -> None:
             and all(
                 mapping(value, "summary.supplemental_effort_comparison").get("complete") is True
                 and mapping(value, "summary.supplemental_effort_comparison").get("reference_pair")
-                == "gpt-5.6-luna/xhigh"
+                == "gpt-5.6-luna/max"
                 and mapping(value, "summary.supplemental_effort_comparison").get("challenger_pair")
-                == "gpt-5.6-luna/high"
+                == "gpt-5.6-luna/xhigh"
                 for value in supplemental_comparisons
             ),
             "Sage effort-only comparisonをprompt profileごとに独立集計してください。",
@@ -703,18 +712,18 @@ def validate_model_selection_eval() -> None:
         except module.EvalConfigError:
             pass
         else:
-            require(False, "Sage xhigh model-tier比較のrole別effort override欠落を拒否してください。")
+            require(False, "Sage max model-tier比較のrole別effort override欠落を拒否してください。")
 
         mixed_sage_dimension_manifest = json.loads(json.dumps(manifest))
         mixed_sage_dimension_manifest["roles"]["sage"]["candidates"].append(
-            {"model": "gpt-5.6-luna", "effort": "high"}
+            {"model": "gpt-5.6-luna", "effort": "xhigh"}
         )
         try:
             module.validate_manifest(mixed_sage_dimension_manifest)
         except module.EvalConfigError:
             pass
         else:
-            require(False, "Sage Luna/high effort challengerをmodel-tier candidateへ混在させないでください。")
+            require(False, "Sage Luna/xhigh effort challengerをmodel-tier candidateへ混在させないでください。")
 
         unknown_component_model_manifest = json.loads(json.dumps(manifest))
         unknown_component_model_manifest["roles"]["sage"]["selected_pair"]["model"] = "gpt-5.6-oracle"
@@ -760,7 +769,7 @@ def validate_model_selection_eval() -> None:
         except module.EvalConfigError:
             pass
         else:
-            require(False, "CourierのSpark/xhigh fixed pair変更を拒否してください。")
+            require(False, "CourierのSpark/high fixed pair変更を拒否してください。")
 
         prepared_root = test_root / "prepared"
         guild_root, _ = module._prepare_guild(manifest["cases"]["bounded_focus_regression"], prepared_root)

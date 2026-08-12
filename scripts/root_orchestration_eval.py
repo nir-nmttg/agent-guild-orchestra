@@ -41,13 +41,13 @@ EXPECTED_PAIRS = {
     "cartographer": {"model": "gpt-5.6-sol", "effort": "high"},
     "guildmaster": {"model": "gpt-5.6-sol", "effort": "xhigh"},
     "captain": {"model": "gpt-5.6-sol", "effort": "high"},
-    "adventurer": {"model": "gpt-5.6-terra", "effort": "high"},
+    "adventurer": {"model": "gpt-5.6-luna", "effort": "max"},
     "artificer": {"model": "gpt-5.6-sol", "effort": "high"},
     "inquisitor": {"model": "gpt-5.6-sol", "effort": "xhigh"},
-    "examiner": {"model": "gpt-5.6-terra", "effort": "high"},
-    "sage": {"model": "gpt-5.6-luna", "effort": "xhigh"},
+    "examiner": {"model": "gpt-5.6-luna", "effort": "max"},
+    "sage": {"model": "gpt-5.6-luna", "effort": "max"},
     "warden": {"model": "gpt-5.6-sol", "effort": "high"},
-    "courier": {"model": "gpt-5.3-codex-spark", "effort": "xhigh"},
+    "courier": {"model": "gpt-5.3-codex-spark", "effort": "high"},
 }
 EXPECTED_CASES = {
     "mapmaking": {

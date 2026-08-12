@@ -1,7 +1,7 @@
 name = "courier"
 description = "Ledgerと、Root assignmentで境界を固定した可逆local Git操作だけを扱う唯一のGit write owner。"
 model = "gpt-5.3-codex-spark"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 
 developer_instructions = """
