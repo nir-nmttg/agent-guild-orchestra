@@ -49,7 +49,7 @@ EXPECTED_UPDATED_AGENT_PAIRS = {
     "adventurer": ("gpt-5.6-luna", "max"),
     "sage": ("gpt-5.6-luna", "max"),
     "examiner": ("gpt-5.6-luna", "max"),
-    "courier": ("gpt-5.3-codex-spark", "high"),
+    "courier": ("gpt-5.6-luna", "high"),
     "inquisitor": ("gpt-5.6-sol", "xhigh"),
 }
 EXPECTED_SKILL_DIRS = {

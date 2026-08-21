@@ -229,8 +229,8 @@ roles:
     sandbox: workspace-write
     cases: [courier_explicit_commit_scope]
     selection_excluded: true
-    fixed_pair: {model: gpt-5.3-codex-spark, effort: high}
-    exclusion_reason: "Sparkは別usage limitのresearch previewで5.6 familyのcost比較対象外"
+    fixed_pair: {model: gpt-5.6-luna, effort: high}
+    exclusion_reason: "courierはdelivery固定pairとしてLuna/highを維持"
 
 cases:
   root_safety_routing:

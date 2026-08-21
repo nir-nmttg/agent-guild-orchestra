@@ -31,7 +31,7 @@ EXPECTED_AGENT_MODEL_CONFIGS = {
     "adventurer": ("gpt-5.6-luna", "max"),
     "sage": ("gpt-5.6-luna", "max"),
     "cartographer": ("gpt-5.6-sol", "high"),
-    "courier": ("gpt-5.3-codex-spark", "high"),
+    "courier": ("gpt-5.6-luna", "high"),
     "examiner": ("gpt-5.6-luna", "max"),
     "guildmaster": ("gpt-5.6-sol", "xhigh"),
     "inquisitor": ("gpt-5.6-sol", "xhigh"),
@@ -292,10 +292,23 @@ def _markdown_h2_section(rel: str, text: str, heading: str) -> str:
 
 def _validate_current_deployment_docs() -> None:
     readme = _markdown_h2_section("README.md", read("README.md"), "仕組み")
-    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはSpark/high"):
+    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはLuna/high"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
-    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.2.0] - 2026-08-13")
+    changelog_text = read("CHANGELOG.md")
+    unreleased = _markdown_h2_section("CHANGELOG.md", changelog_text, "[Unreleased]")
+    require("現在、記録対象の変更はありません。" in unreleased, "CHANGELOG.md のUnreleased sectionは空のrelease準備状態にしてください。")
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.3.0] - 2026-08-22")
+    for token in (
+        "`courier`の固定pairを`gpt-5.3-codex-spark / high`から`gpt-5.6-luna / high`へ変更",
+        "`courier`のauthority、Git操作allowlist、snapshot照合、停止条件は変更せず維持",
+        "template、settings、installer、model-selection/root-orchestration eval、validator、deployment文書を`courier`のLuna/highへ同期",
+        "`VERSION`を`2.3.0`へ更新",
+        "live behavioral/quality/cost comparisonは実施していません",
+    ):
+        require(token in changelog, f"CHANGELOG.md のv2.3.0 release契約に `{token}` が必要です。")
+
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.2.0] - 2026-08-13")
     for token in (
         "実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更",
         "設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持",
@@ -303,6 +316,14 @@ def _validate_current_deployment_docs() -> None:
         "installer、orchestration/model-selection eval、validator、deployment文書を新しい固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記",
     ):
         require(token in changelog, f"CHANGELOG.md のv2.2.0契約に `{token}` が必要です。")
+
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.0.0] - 2026-07-26")
+    for token in (
+        "`sage`をLuna/xhigh",
+        "`inquisitor`をSol/xhigh",
+        "`job_max_runtime_seconds`を1800秒から2400秒へ延長",
+    ):
+        require(token in changelog, f"CHANGELOG.md のv2.0.0契約に `{token}` が必要です。")
 
     deployment_text = read("docs/agent-deployment.md")
     configuration = _markdown_h2_section("docs/agent-deployment.md", deployment_text, "Configuration")
@@ -312,11 +333,11 @@ def _validate_current_deployment_docs() -> None:
         "| `adventurer` | `gpt-5.6-luna` | `workspace-write` | `max` |",
         "| `sage` | `gpt-5.6-luna` | `read-only` | `max` |",
         "| `examiner` | `gpt-5.6-luna` | `read-only` | `max` |",
-        "| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `high` |",
+        "| `courier` | `gpt-5.6-luna` | `workspace-write` | `high` |",
         "| `inquisitor` | `gpt-5.6-sol` | `read-only` | `xhigh` |",
     ):
         require(row in deployment_pairs, f"agent-deployment.md の現行role pair表に `{row}` が必要です。")
-    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "Courierは5.3-Spark/high"):
+    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはLuna/high"):
         require(token in deployment_pairs, f"agent-deployment.md の現行pair説明に `{token}` が必要です。")
 
     selection_text = read("docs/model-selection-evaluation.md")
@@ -325,7 +346,7 @@ def _validate_current_deployment_docs() -> None:
         "| `adventurer` | `gpt-5.6-luna` | `max` |",
         "| `sage` | `gpt-5.6-luna` | `max` |",
         "| `examiner` | `gpt-5.6-luna` | `max` |",
-        "| `courier` | `gpt-5.3-codex-spark` | `high` |",
+        "| `courier` | `gpt-5.6-luna` | `high` |",
         "| `inquisitor` | `gpt-5.6-sol` | `xhigh` |",
         "| `inquisitor` | Sol `xhigh` / Sol `high` |",
         "| `sage` | Luna `max` / Terra `max` / Sol `max`",

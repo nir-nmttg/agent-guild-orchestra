@@ -170,7 +170,7 @@ def validate_settings() -> None:
         "examiner": ("gpt-5.6-luna", "max"),
         "sage": ("gpt-5.6-luna", "max"),
         "warden": ("gpt-5.6-sol", "high"),
-        "courier": ("gpt-5.3-codex-spark", "high"),
+        "courier": ("gpt-5.6-luna", "high"),
     }
     pairs = mapping(model_policy.get("subagent_pairs"), "settings.model_policy.subagent_pairs")
     require(set(pairs) == set(expected_pairs), "settings.model_policy.subagent_pairs は定義済みの10 roleだけにしてください。")

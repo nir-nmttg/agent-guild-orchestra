@@ -162,7 +162,7 @@ EXPECTED_AGENT_MODEL_CONFIGS = {
     'adventurer': ('gpt-5.6-luna', 'max'),
     'sage': ('gpt-5.6-luna', 'max'),
     'cartographer': ('gpt-5.6-sol', 'high'),
-    'courier': ('gpt-5.3-codex-spark', 'high'),
+    'courier': ('gpt-5.6-luna', 'high'),
     'examiner': ('gpt-5.6-luna', 'max'),
     'guildmaster': ('gpt-5.6-sol', 'xhigh'),
     'inquisitor': ('gpt-5.6-sol', 'xhigh'),

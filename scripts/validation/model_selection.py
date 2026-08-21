@@ -73,7 +73,7 @@ def validate_model_selection_eval() -> None:
         "examiner": {"model": "gpt-5.6-luna", "effort": "max"},
         "captain": {"model": "gpt-5.6-sol", "effort": "high"},
         "warden": {"model": "gpt-5.6-sol", "effort": "high"},
-        "courier": {"model": "gpt-5.3-codex-spark", "effort": "high"},
+        "courier": {"model": "gpt-5.6-luna", "effort": "high"},
     }
     for role, value in roles.items():
         role_data = mapping(value, f"model_selection.roles.{role}")
@@ -159,7 +159,6 @@ def validate_model_selection_eval() -> None:
         "gpt-5.6-terra",
         "gpt-5.6-luna",
         "examiner",
-        "gpt-5.3-codex-spark",
         "official_guidance",
         "prompt_caching:",
         "contract_fixtures",
@@ -769,7 +768,7 @@ def validate_model_selection_eval() -> None:
         except module.EvalConfigError:
             pass
         else:
-            require(False, "CourierのSpark/high fixed pair変更を拒否してください。")
+            require(False, "CourierのLuna/high fixed pair変更を拒否してください。")
 
         prepared_root = test_root / "prepared"
         guild_root, _ = module._prepare_guild(manifest["cases"]["bounded_focus_regression"], prepared_root)

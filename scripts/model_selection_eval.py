@@ -466,8 +466,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             if fixed["effort"] not in subagent_allowed_efforts:
                 raise EvalConfigError(f"roles.{role}.fixed_pair effortはsubagent allowed effortsから選んでください。")
             if role == "courier":
-                if fixed != {"model": "gpt-5.3-codex-spark", "effort": "high"}:
-                    raise EvalConfigError("roles.courier.fixed_pair はSpark/highにしてください。")
+                if fixed != {"model": "gpt-5.6-luna", "effort": "high"}:
+                    raise EvalConfigError("roles.courier.fixed_pair はLuna/highにしてください。")
             elif fixed["model"] not in component_model_catalog:
                 raise EvalConfigError(f"roles.{role}.fixed_pair はcomponent model catalogから選んでください。")
             continue

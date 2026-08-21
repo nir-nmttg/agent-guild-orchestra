@@ -6,7 +6,7 @@
 
 Codexを、成果品質、安全な権限境界、検証可能性を優先して動かすためのGuild runtimeテンプレートです。実作業のリポジトリとオーケストレーション用の契約・状態を分離し、作業の大きさとリスクに応じた委譲、検証、監査を支援します。
 
-現在のバージョンは`2.2.0`です。
+現在のバージョンは`2.3.0`です。
 
 > [!IMPORTANT]
 > このプロジェクトは独立したコミュニティプロジェクトであり、OpenAIによる公式提供、提携、支援、承認を受けたものではありません。Codex、GPTおよびOpenAIはOpenAIの商標または登録商標です。本プロジェクトはOpenAIのロゴを使用しません。
@@ -177,7 +177,7 @@ secret、token、credential、password、key、認証情報、PIIは読まず、
 - `Ledger`: 検証根拠と残リスクを記録するSQLite監査履歴
 - helper-issued snapshotとqueue lineageのfail-closedな検証
 
-数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。RootはSolに固定し、reasoning effortはproject-localへ固定せず、利用者が`high`、`xhigh`、`ultra`から選びます。どのmodeでもRootはnamed top-level assignmentだけを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。作業担当として位置付ける`adventurer`、`sage`、`examiner`はLuna/max、Trialの最終decisionを持つ`inquisitor`はSol/xhighを使います。その他の設計、広い判断、統合、例外診断を持つroleは既存のSol pairを維持します。CourierはSpark/highです。この割り当てはLunaの低コスト特性を活用する明示的な構成選択であり、このリポジトリで新たに取得したlive比較による品質・コストの実証ではありません。
+数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。RootはSolに固定し、reasoning effortはproject-localへ固定せず、利用者が`high`、`xhigh`、`ultra`から選びます。どのmodeでもRootはnamed top-level assignmentだけを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。作業担当として位置付ける`adventurer`、`sage`、`examiner`はLuna/max、Trialの最終decisionを持つ`inquisitor`はSol/xhighを使います。その他の設計、広い判断、統合、例外診断を持つroleは既存のSol pairを維持します。CourierはLuna/highです。この割り当てはLunaの低コスト特性を活用する明示的な構成選択であり、このリポジトリで新たに取得したlive比較による品質・コストの実証ではありません。
 
 利用例は[ユースケース集](docs/use-cases/README.md)、設計の詳細は[orchestration runtime](docs/orchestration-runtime.md)と[agent deployment](docs/agent-deployment.md)、モデル選択の方針は[モデル選択評価](docs/model-selection-evaluation.md)を参照してください。
 
