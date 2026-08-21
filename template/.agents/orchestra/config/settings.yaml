@@ -115,7 +115,7 @@ model_policy:
     examiner: {model: gpt-5.6-luna, model_reasoning_effort: max}
     sage: {model: gpt-5.6-luna, model_reasoning_effort: max}
     warden: {model: gpt-5.6-sol, model_reasoning_effort: high}
-    courier: {model: gpt-5.3-codex-spark, model_reasoning_effort: high}
+    courier: {model: gpt-5.6-luna, model_reasoning_effort: high}
 
 workers:
   cartographer:

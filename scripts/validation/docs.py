@@ -31,7 +31,7 @@ EXPECTED_AGENT_MODEL_CONFIGS = {
     "adventurer": ("gpt-5.6-luna", "max"),
     "sage": ("gpt-5.6-luna", "max"),
     "cartographer": ("gpt-5.6-sol", "high"),
-    "courier": ("gpt-5.3-codex-spark", "high"),
+    "courier": ("gpt-5.6-luna", "high"),
     "examiner": ("gpt-5.6-luna", "max"),
     "guildmaster": ("gpt-5.6-sol", "xhigh"),
     "inquisitor": ("gpt-5.6-sol", "xhigh"),
@@ -292,10 +292,21 @@ def _markdown_h2_section(rel: str, text: str, heading: str) -> str:
 
 def _validate_current_deployment_docs() -> None:
     readme = _markdown_h2_section("README.md", read("README.md"), "仕組み")
-    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはSpark/high"):
+    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはLuna/high"):
         require(token in readme, f"README.md の現行deployment説明に `{token}` が必要です。")
 
-    changelog = _markdown_h2_section("CHANGELOG.md", read("CHANGELOG.md"), "[2.0.0] - 2026-07-26")
+    changelog_text = read("CHANGELOG.md")
+    unreleased = _markdown_h2_section("CHANGELOG.md", changelog_text, "[Unreleased]")
+    require("現在、記録対象の変更はありません。" in unreleased, "CHANGELOG.md のUnreleased sectionは空のrelease準備状態にしてください。")
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.2.0] - 2026-08-22")
+    for token in (
+        "`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更",
+        "`courier`の固定pairを`gpt-5.6-luna / high`へ更新",
+        "`VERSION`を`2.2.0`へ更新",
+    ):
+        require(token in changelog, f"CHANGELOG.md のv2.2.0 release契約に `{token}` が必要です。")
+
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.0.0] - 2026-07-26")
     for token in (
         "`sage`をLuna/xhigh",
         "`inquisitor`をSol/xhigh",
@@ -311,11 +322,11 @@ def _validate_current_deployment_docs() -> None:
         "| `adventurer` | `gpt-5.6-luna` | `workspace-write` | `max` |",
         "| `sage` | `gpt-5.6-luna` | `read-only` | `max` |",
         "| `examiner` | `gpt-5.6-luna` | `read-only` | `max` |",
-        "| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `high` |",
+        "| `courier` | `gpt-5.6-luna` | `workspace-write` | `high` |",
         "| `inquisitor` | `gpt-5.6-sol` | `read-only` | `xhigh` |",
     ):
         require(row in deployment_pairs, f"agent-deployment.md の現行role pair表に `{row}` が必要です。")
-    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "Courierは5.3-Spark/high"):
+    for token in ("`adventurer`、`sage`、`examiner`はLuna/max", "`inquisitor`はSol/xhigh", "CourierはLuna/high"):
         require(token in deployment_pairs, f"agent-deployment.md の現行pair説明に `{token}` が必要です。")
 
     selection_text = read("docs/model-selection-evaluation.md")
@@ -324,7 +335,7 @@ def _validate_current_deployment_docs() -> None:
         "| `adventurer` | `gpt-5.6-luna` | `max` |",
         "| `sage` | `gpt-5.6-luna` | `max` |",
         "| `examiner` | `gpt-5.6-luna` | `max` |",
-        "| `courier` | `gpt-5.3-codex-spark` | `high` |",
+        "| `courier` | `gpt-5.6-luna` | `high` |",
         "| `inquisitor` | `gpt-5.6-sol` | `xhigh` |",
         "| `inquisitor` | Sol `xhigh` / Sol `high` |",
         "| `sage` | Luna `max` / Terra `max` / Sol `max`",

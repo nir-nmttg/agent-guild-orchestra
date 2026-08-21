@@ -37,14 +37,14 @@ clean installと通常の再installはいずれもproject-local `model_reasoning
 | `artificer` | `gpt-5.6-sol` | `workspace-write` | `high` | 共有契約、cross-scope glue、統合検証 |
 | `sage` | `gpt-5.6-luna` | `read-only` | `max` | 具体的な独立focusの助言 |
 | `cartographer` | `gpt-5.6-sol` | `read-only` | `high` | read-only mapmaking |
-| `courier` | `gpt-5.3-codex-spark` | `workspace-write` | `high` | Ledgerと、境界固定assignmentの可逆local Git操作を行う唯一のGit write owner |
+| `courier` | `gpt-5.6-luna` | `workspace-write` | `high` | Ledgerと、境界固定assignmentの可逆local Git操作を行う唯一のGit write owner |
 | `examiner` | `gpt-5.6-luna` | `read-only` | `max` | 単一focusのbounded review evidence |
 | `guildmaster` | `gpt-5.6-sol` | `read-only` | `xhigh` | 複数Partyの広域戦略 |
 | `inquisitor` | `gpt-5.6-sol` | `read-only` | `xhigh` | Trial、finding統合、最終decision |
 | `captain` | `gpt-5.6-sol` | `read-only` | `high` | scope、順序、integration、Trial設計 |
 | `warden` | `gpt-5.6-sol` | `read-only` | `high` | 例外的な制御診断 |
 
-deploymentは、設計・最終判断と実作業の責務境界に沿って固定しています。bounded implementation、独立focusの助言、bounded review evidenceを担う`adventurer`、`sage`、`examiner`はLuna/maxです。Trialの最終採否と重大度統合を持つ`inquisitor`はSol/xhighとします。未知領域のomissionが下流へ波及する`cartographer`、scopeと共有契約を設計・統合する`captain` / `artificer`、例外時だけ難しい診断を行う`warden`はSol/highを維持し、最大blast radiusを持つ`guildmaster`はSol/xhighです。Courierは5.3-Spark/highです。この変更はLunaの低コスト特性を活用する明示的なconfiguration choiceであり、新しいlive比較により品質や総コストの改善を実証した結果ではありません。
+deploymentは、設計・最終判断と実作業の責務境界に沿って固定しています。bounded implementation、独立focusの助言、bounded review evidenceを担う`adventurer`、`sage`、`examiner`はLuna/maxです。Trialの最終採否と重大度統合を持つ`inquisitor`はSol/xhighとします。未知領域のomissionが下流へ波及する`cartographer`、scopeと共有契約を設計・統合する`captain` / `artificer`、例外時だけ難しい診断を行う`warden`はSol/highを維持し、最大blast radiusを持つ`guildmaster`はSol/xhighです。CourierはLuna/highです。この変更はLunaの低コスト特性を活用する明示的なconfiguration choiceであり、新しいlive比較により品質や総コストの改善を実証した結果ではありません。
 
 subagentのreasoning effortはroleごとに固定し、実行中に動的変更しません。deployment pairに対するalternative challengerはmodel-selection evalで比較できますが、実行中の自動切替には使いません。`max`は`adventurer`、`sage`、`examiner`だけに固定し、`ultra`は全subagentから除外します。Rootのcomponent referenceはhighですが、runtime templateへはpinせず、high/xhigh/ultraを利用者が選びます。
 
@@ -149,7 +149,7 @@ validatorは次を確認します。
 - Root modelはSol、reasoning effortはproject-local未指定、利用者選択はhigh/xhigh/ultra（component referenceのhighとは分離）
 - deployment pairとchallengerの分離、3 roleだけのmax固定、および全subagentのultra禁止
 - Rootのcoordination-only境界と、ultraを含むnamed-role topology
-- Courier Spark/highの固定
+- Courier Luna/highの固定
 - inquisitorだけのnested capabilityと、その他custom agentのterminal設定
 - `max_threads=64`、`max_depth=2`、`job_max_runtime_seconds=2400`
 - 全10 roleの`max_parallel`合計48、非adventurer合計16、`adventurer.max_parallel=32`、未割当headroom 16

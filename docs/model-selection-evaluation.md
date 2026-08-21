@@ -11,10 +11,9 @@
   - `gpt-5.6-sol`: frontier agentic coding model
   - `gpt-5.6-terra`: balanced everyday agentic coding model
   - `gpt-5.6-luna`: fast and affordable agentic coding model
-  - `gpt-5.3-codex-spark`: ultra-fast coding model
 - component evalではRootのhighをreferenceとし、high/xhighを同じsingle-role条件で比較します。`adventurer`、`sage`、`examiner`はLuna/maxをdeploymentへ固定し、同じmaxでmodel tierを比較します。`ultra`は全subagentで使いません。runtime templateはRoot effortをproject-localにpinせず、利用者が`high / xhigh / ultra`を選びます。
 - `ultra`はRootのproactive delegationと統合を含むorchestration modeとして扱います。`multi_agent=false`のcomponent effort比較へ混ぜず、named role、許可辺、depth、authority、handoff、最終task outcomeを30 deterministic synthetic contract trace（10 case × 3 mode、negative/mutation testを含む）で検証する対象です。trace validatorは実装済みですが、live real-model fan-out matrixは未検証です。
-- `courier` はユーザー指定によりmodelを `gpt-5.3-codex-spark` のまま、effortを`high`へ変更し、model 選定の対象外としました。
+- `courier` はユーザー指定により model を `gpt-5.6-luna` へ変更し、effort を `high` へ固定しました。
 
 2026-08-10のdeployment更新は、設計・判断・統合を既存のSol roleへ残し、実装・作業担当をLuna/maxへ寄せる明示的なconfiguration choiceです。これはlive比較による品質・コストの実証ではありません。新runnerによるlive比較は実行していないため、この変更自体はLuna/maxの品質非劣性やQuest全体のコスト改善を実証するものではありません。
 
@@ -148,7 +147,7 @@ component runnerはpilot専用で、`formal_recommendation_available`を常にfa
 | `adventurer` | `gpt-5.6-luna` | `max` |
 | `sage` | `gpt-5.6-luna` | `max` |
 | `cartographer` | `gpt-5.6-sol` | `high` |
-| `courier` | `gpt-5.3-codex-spark` | `high` |
+| `courier` | `gpt-5.6-luna` | `high` |
 | `examiner` | `gpt-5.6-luna` | `max` |
 | `guildmaster` | `gpt-5.6-sol` | `xhigh` |
 | `inquisitor` | `gpt-5.6-sol` | `xhigh` |

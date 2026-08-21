@@ -47,7 +47,7 @@ EXPECTED_PAIRS = {
     "examiner": {"model": "gpt-5.6-luna", "effort": "max"},
     "sage": {"model": "gpt-5.6-luna", "effort": "max"},
     "warden": {"model": "gpt-5.6-sol", "effort": "high"},
-    "courier": {"model": "gpt-5.3-codex-spark", "effort": "high"},
+    "courier": {"model": "gpt-5.6-luna", "effort": "high"},
 }
 EXPECTED_CASES = {
     "mapmaking": {
