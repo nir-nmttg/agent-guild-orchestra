@@ -6,21 +6,28 @@
 
 現在、記録対象の変更はありません。
 
-## [2.2.0] - 2026-08-22
-
-### 概要
-
-- 実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更
-- 設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持
+## [2.3.0] - 2026-08-22
 
 ### 変更
 
-- `courier`の固定pairを`gpt-5.6-luna / high`へ更新
-- `template/.codex/agents/courier.toml`、`template/.agents/orchestra/config/settings.yaml`、関連する検証・evaluation定義を更新
-- `VERSION`を`2.2.0`へ更新
-- installer、orchestration/model-selection eval、validator、deployment文書を固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記
+- `courier`の固定pairを`gpt-5.3-codex-spark / high`から`gpt-5.6-luna / high`へ変更
+- `courier`のauthority、Git操作allowlist、snapshot照合、停止条件は変更せず維持
+- template、settings、installer、model-selection/root-orchestration eval、validator、deployment文書を`courier`のLuna/highへ同期
+- `VERSION`を`2.3.0`へ更新
+- この変更は明示的な構成選択であり、live behavioral/quality/cost comparisonは実施していません（live品質・コスト比較は未実施）
 
-`VERSION`は`2.2.0`です。モデル固定pairとrelease validationの整合を取るためのminor updateです。
+`VERSION`は`2.3.0`です。courierの固定pairとrelease validationの整合を取るminor updateです。
+
+## [2.2.0] - 2026-08-13
+
+### 変更
+
+- 実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更
+- 設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持
+- `courier`のmodelは`gpt-5.3-codex-spark`のまま、reasoning effortを`xhigh`から`high`へ変更
+- installer、orchestration/model-selection eval、validator、deployment文書を新しい固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記
+
+`VERSION`は`2.2.0`です。runtime schema、role topology、authority境界、依存関係、migration、deploy、公開APIは変更しない後方互換のminor updateです。
 
 ## [2.1.0] - 2026-08-03
 

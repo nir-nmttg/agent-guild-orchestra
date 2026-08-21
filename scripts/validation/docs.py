@@ -298,13 +298,24 @@ def _validate_current_deployment_docs() -> None:
     changelog_text = read("CHANGELOG.md")
     unreleased = _markdown_h2_section("CHANGELOG.md", changelog_text, "[Unreleased]")
     require("現在、記録対象の変更はありません。" in unreleased, "CHANGELOG.md のUnreleased sectionは空のrelease準備状態にしてください。")
-    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.2.0] - 2026-08-22")
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.3.0] - 2026-08-22")
     for token in (
-        "`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更",
-        "`courier`の固定pairを`gpt-5.6-luna / high`へ更新",
-        "`VERSION`を`2.2.0`へ更新",
+        "`courier`の固定pairを`gpt-5.3-codex-spark / high`から`gpt-5.6-luna / high`へ変更",
+        "`courier`のauthority、Git操作allowlist、snapshot照合、停止条件は変更せず維持",
+        "template、settings、installer、model-selection/root-orchestration eval、validator、deployment文書を`courier`のLuna/highへ同期",
+        "`VERSION`を`2.3.0`へ更新",
+        "live behavioral/quality/cost comparisonは実施していません",
     ):
-        require(token in changelog, f"CHANGELOG.md のv2.2.0 release契約に `{token}` が必要です。")
+        require(token in changelog, f"CHANGELOG.md のv2.3.0 release契約に `{token}` が必要です。")
+
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.2.0] - 2026-08-13")
+    for token in (
+        "実装・作業担当として位置付ける`adventurer`、`sage`、`examiner`の固定pairを`gpt-5.6-luna / max`へ変更",
+        "設計・判断・統合を担う既存Sol role pair、Root設定、role topology、authority境界は維持",
+        "`courier`のmodelは`gpt-5.3-codex-spark`のまま、reasoning effortを`xhigh`から`high`へ変更",
+        "installer、orchestration/model-selection eval、validator、deployment文書を新しい固定pairへ同期。この割り当ては明示的な構成選択であり、新たなlive品質・コスト実証ではないことを明記",
+    ):
+        require(token in changelog, f"CHANGELOG.md のv2.2.0契約に `{token}` が必要です。")
 
     changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.0.0] - 2026-07-26")
     for token in (
