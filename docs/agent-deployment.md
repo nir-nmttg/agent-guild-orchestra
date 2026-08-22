@@ -8,6 +8,7 @@ Root modelはSolに固定しますが、project-local reasoning effortは指定�
 
 ```toml
 model = "gpt-5.6-sol"
+model_context_window = 1_050_000
 sandbox_mode = "read-only"
 approval_policy = "on-request"
 
@@ -25,6 +26,8 @@ clean installと通常の再installはいずれもproject-local `model_reasoning
 `job_max_runtime_seconds=2400`は、maxの作業担当やxhighのTrial判断が中途で打ち切られないためのjob単位の有界timeoutです。並列数、総spawn数、token、costの上限は変更しません。
 
 `workspace-write` agentの外部通信は有効です。外部通信を伴うコマンドも`approval_policy = "on-request"`と実行環境の承認境界に従います。
+
+Rootの`model_context_window = 1_050_000`はGPT-5.6 Solのfull supported windowです。custom agent TOMLはこの設定を継承し、全subagent roleで`model_auto_compact_token_limit = 200_000`を明示してearly compactionを有効にします。これはhistoryの作業集合をboundedにする設定であり、subagentの物理model context windowを小さくするものではありません。
 
 `inquisitor`だけが`features.multi_agent=true`で、risk-triggeredな単一focusを`examiner`へ委譲できます。その他のcustom agentは`features.multi_agent=false`のterminal workerです。`max_depth=2`と`max_threads=64`を設定し、policy上はRoot(depth 0)→Inquisitor(depth 1)→Examiner(depth 2)だけを許可します。role別`max_parallel`は`adventurer.max_parallel=32`、非adventurer合計16の計48とし、global 64との差16は特定roleの予約枠ではない未割当headroomとして残します。これらの値は同時実行の設定であり、総spawn数、token、costのhard capとは扱いません。
 

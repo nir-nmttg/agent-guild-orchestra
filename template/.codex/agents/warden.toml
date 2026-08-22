@@ -2,6 +2,7 @@ name = "warden"
 description = "矛盾、反復失敗、scope drift、高リスクunknown時に進行停止と次行動を診断する守衛役。"
 model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
+model_auto_compact_token_limit = 200_000
 sandbox_mode = "read-only"
 
 developer_instructions = """

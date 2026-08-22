@@ -2,6 +2,7 @@ name = "artificer"
 description = "複数bounded scopeを一つの成果へ組み上げ、cross-scope契約と統合検証を完遂する実装職。"
 model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
+model_auto_compact_token_limit = 200_000
 sandbox_mode = "workspace-write"
 
 developer_instructions = """

@@ -170,6 +170,8 @@ EXPECTED_AGENT_MODEL_CONFIGS = {
     'warden': ('gpt-5.6-sol', 'high'),
     'captain': ('gpt-5.6-sol', 'high'),
 }
+ROOT_MODEL_CONTEXT_WINDOW = 1_050_000
+SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT = 200_000
 EXPECTED_ORCHESTRA_SKILL_DIRS = {
     'branch-implementation-final-review',
     'browser-research-readonly',
@@ -1391,8 +1393,13 @@ def validate_codex_agent_preflight(source_root: Path) -> None:
             raise SystemExit(f'template/.codex/config.toml の既定 {key} は {expected} にしてください。')
     if 'model_reasoning_effort' in config:
         raise SystemExit('template/.codex/config.toml でRoot reasoning effortを固定しないでください。')
-    if 'model_context_window' in config:
-        raise SystemExit('model_context_window は model catalog に追随させ、Root config で固定しないでください。')
+    if config.get('model_context_window') != ROOT_MODEL_CONTEXT_WINDOW:
+        raise SystemExit(
+            'template/.codex/config.toml の model_context_window は '
+            f'{ROOT_MODEL_CONTEXT_WINDOW}（GPT-5.6のfull supported window）にしてください。'
+        )
+    if 'model_auto_compact_token_limit' in config:
+        raise SystemExit('Root configではearly compactionを固定せず、subagent agent fileごとに指定してください。')
     sandbox_workspace_write = config.get('sandbox_workspace_write')
     if not isinstance(sandbox_workspace_write, dict) or sandbox_workspace_write.get('network_access') is not True:
         raise SystemExit('template/.codex/config.toml の sandbox_workspace_write.network_access は true にしてください。')
@@ -1433,6 +1440,15 @@ def validate_codex_agent_preflight(source_root: Path) -> None:
             raise SystemExit(f'template/.codex/agents/{role}.toml の model は {expected_model} にしてください。')
         if agent.get('model_reasoning_effort') != expected_effort:
             raise SystemExit(f'template/.codex/agents/{role}.toml の model_reasoning_effort は {expected_effort} にしてください。')
+        if agent.get('model_auto_compact_token_limit') != SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT:
+            raise SystemExit(
+                f'template/.codex/agents/{role}.toml の model_auto_compact_token_limit は '
+                f'{SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT} にしてください。'
+            )
+        if 'model_context_window' in agent:
+            raise SystemExit(
+                f'template/.codex/agents/{role}.toml に model_context_window を固定しないでください。'
+            )
         features = agent.get('features')
         expected_multi_agent = role == 'inquisitor'
         if not isinstance(features, dict) or features.get('multi_agent') is not expected_multi_agent:
