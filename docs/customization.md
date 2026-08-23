@@ -8,6 +8,7 @@
 - rankの説明
 - subagent roleごとのmodelと固定reasoning effort
 - Rootのreasoning effortは起動時/UI/global configなどで`high / xhigh / ultra`から選択（runtime templateではproject-localに固定しない）
+- Rootは`model_context_window = 1_050_000`のfull supported window、subagentは`model_auto_compact_token_limit = 200_000`のearly-compaction（physical context windowは継承）
 - change-type別Trial check
 - evidence/outputの表現
 - worker並列数

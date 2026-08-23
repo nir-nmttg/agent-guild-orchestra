@@ -77,6 +77,8 @@ Skill candidate は `.orchestra/skill-candidates/<target-repo>/<candidate>/` に
 
 通常の差分同期と`--clean-install`はいずれも、導入先`.codex/config.toml`へRootの`model_reasoning_effort`を出力しません。旧project-local指定が存在する場合もテンプレート同期で除去し、reasoning effortは起動時/UI/global configなどでの`high / xhigh / ultra`の利用者選択へ委ねます。
 
+同じtemplate同期でRootの`model_context_window = 1_050_000`（GPT-5.6のfull supported window）と、全custom agentの`model_auto_compact_token_limit = 200_000`（early compaction）も更新します。subagentへ小さい`model_context_window`を設定せず、物理windowはRootから継承したままhistoryだけをboundedにします。
+
 既定以外の source template を直接指定する場合は、信頼済み検証用途に限り `--allow-non-default-source` を併用します。
 source tree に symlink、秘密情報らしい path、MCP などの外部 tool 連携 path が含まれる場合、installer は拒否します。
 

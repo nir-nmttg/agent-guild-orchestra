@@ -23,6 +23,8 @@ EXCLUDE_START = "# agent-guild-orchestra:start"
 EXCLUDE_END = "# agent-guild-orchestra:end"
 BACKUP_DIRECTORY = ".agent-guild-orchestra-backups"
 RUNTIME_SCHEMA_VERSION = "4.0"
+ROOT_MODEL_CONTEXT_WINDOW = 1_050_000
+SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT = 200_000
 
 READ_ONLY_AGENT_ROLES = (
     "sage",
@@ -141,6 +143,11 @@ def _assert_installed_surface(target: Path, allowed_extra_skills: set[str] | Non
     require((target / ".codex/config.toml").exists(), "install.py は .codex/config.toml を導入してください。")
     root_config = INSTALLER.read_toml_document(target / ".codex/config.toml")
     require(root_config.get("model") == "gpt-5.6-sol", "install.py はRoot modelをSolにしてください。")
+    require(
+        root_config.get("model_context_window") == ROOT_MODEL_CONTEXT_WINDOW,
+        f"install.py はRootのfull supported model_context_windowを{ROOT_MODEL_CONTEXT_WINDOW}にしてください。",
+    )
+    require("model_auto_compact_token_limit" not in root_config, "install.py はRootへsubagent用early compactionを出力しないでください。")
     require("model_reasoning_effort" not in root_config, "install.py はRoot reasoning effortをproject-localに出力しないでください。")
     agents_config = root_config.get("agents")
     require(
@@ -155,6 +162,16 @@ def _assert_installed_surface(target: Path, allowed_extra_skills: set[str] | Non
         require(
             (agent.get("model"), agent.get("model_reasoning_effort")) == expected_pair,
             f"install.py は導入先の{role} model/effortを{expected_pair[0]}/{expected_pair[1]}にしてください。",
+        )
+    for agent_path in sorted(agent_dir.glob("*.toml")):
+        agent = INSTALLER.read_toml_document(agent_path)
+        require(
+            agent.get("model_auto_compact_token_limit") == SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT,
+            f"install.py は導入先の{agent_path.stem}へ{SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT}のearly compactionを設定してください。",
+        )
+        require(
+            "model_context_window" not in agent,
+            f"install.py は導入先の{agent_path.stem}でmodel_context_windowを固定しないでください。",
         )
     skill_dir = target / ".agents/skills"
     actual_skills = {path.name for path in skill_dir.iterdir() if path.is_dir()}
@@ -989,6 +1006,28 @@ def validate_install_upgrade_smoke() -> None:
 
     pinned_root_effort = run_with_mutated_source("Root reasoning effort pinned", pin_root_reasoning_effort)
     require("reasoning effort" in (pinned_root_effort.stdout + pinned_root_effort.stderr), "install.py preflightはRootのproject-local effort指定を拒否してください。")
+
+    def drift_root_context_window(source: Path) -> None:
+        path = source / ".codex/config.toml"
+        path.write_text(path.read_text(encoding="utf-8").replace("model_context_window = 1_050_000", "model_context_window = 400_000", 1), encoding="utf-8")
+
+    invalid_root_context = run_with_mutated_source("Root context window drift", drift_root_context_window)
+    require(
+        "model_context_window" in (invalid_root_context.stdout + invalid_root_context.stderr)
+        and "1050000" in (invalid_root_context.stdout + invalid_root_context.stderr),
+        "install.py preflightはRootのfull supported context window driftを拒否してください。",
+    )
+
+    def drift_subagent_compaction(source: Path) -> None:
+        path = source / ".codex/agents/adventurer.toml"
+        path.write_text(path.read_text(encoding="utf-8").replace("model_auto_compact_token_limit = 200_000", "model_auto_compact_token_limit = 400_000", 1), encoding="utf-8")
+
+    invalid_subagent_compaction = run_with_mutated_source("subagent compaction drift", drift_subagent_compaction)
+    require(
+        "model_auto_compact_token_limit" in (invalid_subagent_compaction.stdout + invalid_subagent_compaction.stderr)
+        and "200000" in (invalid_subagent_compaction.stdout + invalid_subagent_compaction.stderr),
+        "install.py preflightはsubagent early-compaction driftを拒否してください。",
+    )
 
     def downgrade_settings_version(source: Path) -> None:
         path = source / ".agents/orchestra/config/settings.yaml"

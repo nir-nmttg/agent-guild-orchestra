@@ -6,6 +6,17 @@
 
 現在、記録対象の変更はありません。
 
+## [2.4.0] - 2026-08-23
+
+### 変更
+
+- RootのGPT-5.6 full supported context window（1,050,000 tokens）をtemplateへ固定し、全custom subagentへ200,000-token early compactionを追加
+- Rootのfull windowとsubagentのbounded working setをinstaller、validator、deployment文書へ同期
+- `VERSION`を`2.4.0`へ更新
+- この変更は明示的な構成選択であり、live behavioral/quality/cost comparisonは実施していません（live品質・コスト比較は未実施）
+
+`VERSION`は`2.4.0`です。Rootのfull contextとsubagentのearly compactionを追加する後方互換のminor updateです。
+
 ## [2.3.0] - 2026-08-22
 
 ### 変更

@@ -2,6 +2,7 @@ name = "guildmaster"
 description = "`guild_quest` の戦略、Party 境界、authority、Trial 方針を設計する担当。"
 model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
+model_auto_compact_token_limit = 200_000
 sandbox_mode = "read-only"
 
 developer_instructions = """

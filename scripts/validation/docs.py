@@ -40,6 +40,9 @@ EXPECTED_AGENT_MODEL_CONFIGS = {
     "warden": ("gpt-5.6-sol", "high"),
 }
 
+ROOT_MODEL_CONTEXT_WINDOW = 1_050_000
+SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT = 200_000
+
 RUNTIME_PROSE = (
     "template/AGENTS.md",
     "template/.agents/orchestra/instructions/common.md",
@@ -213,6 +216,11 @@ def validate_agents() -> None:
         require(data["name"] == role, f"{rel} のnameはfilenameと一致させてください。")
         require(data["sandbox_mode"] == EXPECTED_AGENT_SANDBOX_MODES[role], f"{rel} のsandbox_modeが不正です。")
         require((data["model"], data["model_reasoning_effort"]) == expected_agent_model_configs[role], f"{rel} のmodel/effortが不正です。")
+        require(
+            data.get("model_auto_compact_token_limit") == SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT,
+            f"{rel} のmodel_auto_compact_token_limitは{SUBAGENT_AUTO_COMPACT_TOKEN_LIMIT}にしてください。",
+        )
+        require("model_context_window" not in data, f"{rel} はmodel_context_windowを固定せずRoot設定を継承してください。")
         features = mapping(data.get("features"), f"{rel}.features")
         expected_multi_agent = role == "inquisitor"
         require(features.get("multi_agent") is expected_multi_agent, f"{rel} のmulti_agentはinquisitorだけtrueにしてください。")
@@ -246,6 +254,11 @@ def validate_agents() -> None:
 
     config = tomllib.loads(read("template/.codex/config.toml"))
     require(config.get("model") == expected_root_model, "Root templateのmodelはSolにしてください。")
+    require(
+        config.get("model_context_window") == ROOT_MODEL_CONTEXT_WINDOW,
+        f"Root templateのmodel_context_windowは{ROOT_MODEL_CONTEXT_WINDOW}にしてください。",
+    )
+    require("model_auto_compact_token_limit" not in config, "Root templateでsubagent用early compactionを固定しないでください。")
     require("model_reasoning_effort" not in config, "Root templateでreasoning effortを固定しないでください。")
     require(config.get("sandbox_mode") == "read-only", "Root sandboxはread-onlyにしてください。")
     require(config.get("approval_policy") == "on-request" and config.get("approvals_reviewer") == "auto_review", "Root approval contractが不正です。")
@@ -297,7 +310,24 @@ def _validate_current_deployment_docs() -> None:
 
     changelog_text = read("CHANGELOG.md")
     unreleased = _markdown_h2_section("CHANGELOG.md", changelog_text, "[Unreleased]")
-    require("現在、記録対象の変更はありません。" in unreleased, "CHANGELOG.md のUnreleased sectionは空のrelease準備状態にしてください。")
+    require(
+        "現在、記録対象の変更はありません。" in unreleased,
+        "CHANGELOG.md のUnreleased sectionは空のrelease準備状態にしてください。",
+    )
+    require(
+        "RootのGPT-5.6 full supported context window（1,050,000 tokens）をtemplateへ固定し、全custom subagentへ200,000-token early compactionを追加" not in unreleased,
+        "CHANGELOG.md のUnreleased sectionへrelease済みcontext policyを残さないでください。",
+    )
+    changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.4.0] - 2026-08-23")
+    for token in (
+        "RootのGPT-5.6 full supported context window（1,050,000 tokens）をtemplateへ固定し、全custom subagentへ200,000-token early compactionを追加",
+        "Rootのfull windowとsubagentのbounded working setをinstaller、validator、deployment文書へ同期",
+        "`VERSION`を`2.4.0`へ更新",
+        "この変更は明示的な構成選択であり、live behavioral/quality/cost comparisonは実施していません",
+        "`VERSION`は`2.4.0`です。Rootのfull contextとsubagentのearly compactionを追加する後方互換のminor updateです。",
+    ):
+        require(token in changelog, f"CHANGELOG.md のv2.4.0 release契約に `{token}` が必要です。")
+
     changelog = _markdown_h2_section("CHANGELOG.md", changelog_text, "[2.3.0] - 2026-08-22")
     for token in (
         "`courier`の固定pairを`gpt-5.3-codex-spark / high`から`gpt-5.6-luna / high`へ変更",
