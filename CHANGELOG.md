@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
-現在、記録対象の変更はありません。
+- 非Git親を標準導入先に戻し、設定rootと実Git rootを分離。子repositoryのfile/index/config/ignore ruleは通常導入・更新で変更しない
+- 親manifestをschema 2にし、旧親の未変更配布物だけをhashで確認して退避。独自設定・変更済みfile・第三者Skillを保持
+- 子側v3からの移行用に、明示された子の未変更・未追跡配布物だけを扱う独立したDocker cleanupを追加
+- 親起動のCodex設定・AGENTS・Skill探索を実測し、Git境界による探索停止とnamed agent実行の未確認範囲を文書化
+
+- `install.sh`、`sync.sh`、`make validate`をDocker内のPython 3.12とGitで実行し、ホストPythonのversion依存を解消
+- Docker launcherの引数・mount検証と、実Dockerによる導入・更新・旧Guild root移行・linked worktreeのsmoke testを追加
 
 ## [3.0.0] - 2026-09-05
 

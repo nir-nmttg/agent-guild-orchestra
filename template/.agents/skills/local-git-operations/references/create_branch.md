@@ -11,8 +11,9 @@ new refは目的を表す短いASCII名にし、secret、PII、長文チケッ�
 ```python
 import json, pathlib, subprocess
 
-root = "/absolute/path/to/repository"
-runtime = pathlib.Path(root) / ".agents/orchestra/scripts"
+guild_root = pathlib.Path("/absolute/path/to/asked-root")
+root = str(guild_root / "repositories/asked_backend")
+runtime = guild_root / ".agents/orchestra/scripts"
 snapshot = json.loads(subprocess.check_output([
     "python3", str(runtime / "snapshot_digest.py"),
     "--repo", root, "--kind", "revision_only",

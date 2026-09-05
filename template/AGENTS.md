@@ -11,6 +11,9 @@ This is the compact operating contract for the Guildmaster session. The user req
 
 ## Scope and authorization
 
+- Start and keep the Codex session at the non-Git shared parent (`guild_root`). Shared instructions, `.codex`, `.agents`, and the install manifest belong only there. Code lives under `guild_root/repositories/`; do not copy shared files into child repositories or hide them with Git ignore rules.
+- Each code task names an explicit `target_repo_root` separately from `guild_root`. Before editing, read that child's applicable `AGENTS.override.md` / `AGENTS.md` and nested instructions. Inspect conflicting child settings and report them; do not assume child config or Skills are merged into a parent-started session. Pass both roots in delegation and keep agents based at the parent.
+- Locate helpers at `guild_root/.agents/orchestra/scripts`, but pass the actual child Git root to every snapshot and Git operation. Use command workdir or `git -C` for the child; never treat the parent as a Git root or infer one repository's authority from a sibling.
 - Work only in the target and paths supplied by the user or assignment. Normal local reading, editing, and focused checks are authorized within that scope; do not add approval or review ceremony for low-risk work.
 - Git and external actions require an explicit operation, target, and path/ref or publication scope. Use `git_guard` and snapshot helpers before and after a local Git write; consume their output as evidence and never invent digests or metadata. Do not push, publish, deploy, delete, reset, rewrite history, or change permissions without the required authorization.
 - A snapshot is needed for a Git write or an explicit stale-risk check, not for every exploration. If a stage leaves content unchanged, do not repeat a model review solely for that reason.

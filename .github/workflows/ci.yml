@@ -28,6 +28,9 @@ jobs:
       - name: リポジトリ提供の検証を実行
         run: make validate
 
+      - name: Docker経由の導入・更新・旧環境移行を確認
+        run: bash scripts/test-docker-install.sh
+
       - name: イベント範囲のwhitespace errorを確認
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}

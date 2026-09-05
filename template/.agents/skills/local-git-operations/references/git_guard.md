@@ -6,6 +6,8 @@
 
 このtemplateのruntimeでは、まずsnapshotをCLIまたは同じmoduleの`compute_snapshot(...)`で発行します。
 
+helperの配置場所は非Git親の`<guild_root>/.agents/orchestra/scripts/`です。以下のCLIはその絶対pathで呼び出し、`--repo`とcontractの`target_repo_root`には操作する子の実Git rootを渡します。親にGit操作を向けたり、子にhelperを複製したりしません。
+
 ```text
 snapshot_digest.py --repo <absolute-git-root> --kind revision_only|working_tree_content|commit_range [--base-ref <ref>] [--head-ref <ref>] [--scope <relative-path>]... [--untracked <relative-path>]...
 ```

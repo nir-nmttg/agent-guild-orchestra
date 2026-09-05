@@ -1,0 +1,31 @@
+model = "gpt-5.6-sol"
+model_context_window = 1_050_000
+sandbox_mode = "read-only"
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
+web_search = "cached"
+allow_login_shell = false
+
+[sandbox_workspace_write]
+network_access = true
+
+[shell_environment_policy]
+inherit = "core"
+exclude = [
+	"*secret*",
+	"*token*",
+	"*credential*",
+	"*password*",
+	"*key*",
+	"*auth*",
+]
+
+[agents]
+max_threads = 64
+# Root(depth 0)→Inquisitor(depth 1)→Examiner(depth 2)だけを許可する。
+max_depth = 2
+job_max_runtime_seconds = 2400
+
+[features]
+codex_hooks = true
+multi_agent = true

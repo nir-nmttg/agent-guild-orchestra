@@ -23,7 +23,7 @@ push、Pull Request、merge、release、deployなどの公開は`github-publish-
 
 ## 手順
 
-1. target Git root、operation、current/base/new ref、path/hunk、許可された副作用を固定し、status、detached HEAD、保護branch、staged/unstaged/untracked、upstreamをread-onlyで確認する。
+1. 設定を置く非Git親の`guild_root`と、操作対象の実Git root `target_repo_root`を分ける。helperは親の`.agents/orchestra/scripts/`から読み、Git引数には子の実Git rootを渡す。operation、current/base/new ref、path/hunk、許可された副作用を固定し、status、detached HEAD、保護branch、staged/unstaged/untracked、upstreamをread-onlyで確認する。
 2. writeの時だけsnapshotを作り、`git_guard`へexplicit operation、scope、preconditionとともに渡す。explorationだけではsnapshotを作らない。
 3. referenceのclosed allowlistだけを実行し、対象やscopeが変わったら止めて再契約する。
 4. commit前は意図したstaged diffをread-onlyで確認する。`working_tree_content` snapshotはworktree contentとexact path scopeを示すが、staged hunk compositionは証明しない。write後にstatus、ref、対象差分、helperのpostcondition snapshotを確認し、この限界を含むpre/post evidenceと残るriskを返す。

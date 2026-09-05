@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'valid_root(){ case \"$1\" in */repositories/*) return 1;; esac; [ -d \"$1/repositories\" ] && [ -x \"$1/.codex/hooks/stop_quality_gate.sh\" ] && [ -f \"$1/.agents/orchestra/config/settings.yaml\" ]; }; env_root=$AGENT_GUILD_ORCHESTRA_ROOT; tried_env=0; for base in \"$env_root\" \"$PWD\"; do [ -z \"$base\" ] && continue; [ \"$base\" = \"$env_root\" ] && tried_env=1; p=$base; while :; do if valid_root \"$p\"; then exec \"$p/.codex/hooks/stop_quality_gate.sh\"; fi; [ \"$p\" = / ] && break; p=$(dirname \"$p\"); done; done; if [ \"$tried_env\" = 1 ]; then printf \"%s\\n\" \"{\\\"continue\\\":true,\\\"systemMessage\\\":\\\"agent-guild-orchestra: AGENT_GUILD_ORCHESTRA_ROOT と PWD から Stop hook root が見つかりません。AGENT_GUILD_ORCHESTRA_ROOT にはギルド規約ルートを設定してください。\\\"}\"; else printf \"%s\\n\" \"{\\\"continue\\\":true,\\\"systemMessage\\\":\\\"agent-guild-orchestra: Stop hook root が見つかりません。子 repo を repositories/<repo> 配下で起動している場合も PWD から親方向にギルド規約ルートを探索します。見つからない場合は AGENT_GUILD_ORCHESTRA_ROOT にギルド規約ルートを設定してください。\\\"}\"; fi'",
+            "timeout": 10,
+            "statusMessage": "最終回答の要約を確認中"
+          }
+        ]
+      }
+    ]
+  }
+}

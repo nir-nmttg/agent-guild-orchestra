@@ -2,6 +2,12 @@
 
 Agent Guild Orchestra 3はCodexのproject-local configuration、二つのcustom agent、core Skill、stateless Git/snapshot helperを配布します。会話履歴とCodex native task/messageが作業状態です。独自queue、scheduler、database、inbox、status machineはありません。
 
+## 起動場所と作業対象
+
+設定は非Git親`guild_root`に一組だけ置き、その親をCodexでtrustして新しいlocal taskを開始します。子Git repositoryは`repositories/`に置きます。親の設定・Skill探索を維持するためsessionの基点を親に保ち、コード変更commandは明示workdir、Git commandは実Git rootを指定します。各childとnested pathのAGENTS指示を先に読み、子設定との競合を報告します。設定探索の実測と限界は[親配置](parent-layout.md)を参照してください。
+
+委譲には`guild_root`と対象の`target_repo_root`を渡します。helperは前者から読み込み、snapshot/guardは後者を検証します。複数repositoryを扱う場合、Git操作の対象と承認・snapshotをrepositoryごとに分けます。インストールと更新のDocker containerは終了時に削除され、常駐runtimeにはなりません。
+
 ## Rootとdelegation
 
 RootはAstra modelを使い、project configでreasoning effortを固定せず、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。

@@ -2,7 +2,7 @@
 
 # Agent Guild Orchestra
 
-Agent Guild Orchestra 3.0.0は、Codexのproject-local設定、二つのcustom agent、五つのSkill、安全確認用の小さなhelperをGitリポジトリへ配布するテンプレートです。常駐serviceや独自schedulerはありません。Codex自身の会話履歴、subagent、message、approvalを使います。
+Agent Guild Orchestra 3.0.0は、Codexのproject-local設定、二つのcustom agent、五つのSkill、安全確認用の小さなhelperを非Gitの親ディレクトリへ配布するテンプレートです。常駐serviceや独自schedulerはありません。Codex自身の会話履歴、subagent、message、approvalを使います。
 
 > [!IMPORTANT]
 > このプロジェクトは独立したコミュニティプロジェクトであり、OpenAIによる公式提供、提携、支援、承認を受けたものではありません。
@@ -16,44 +16,69 @@ custom agentはAdventurerとInquisitorだけです。旧版の十role、Quest / 
 ## 前提
 
 - Git
-- Python 3.11以上
+- Bashと、起動済みのDocker DesktopまたはローカルDocker Engine
 - project-local custom agentを利用できるCodex
 
-外部Python packageとDockerは通常の導入・検証に不要です。
+導入・更新と`make validate`はDocker内のPython 3.12とGitを使い、ホストのPythonの有無やversionに依存しません。初回は公式Python imageを取得して検証用imageをbuildするためnetwork接続が必要です。以後はbuild cacheを再利用します。macOS/Linux（WindowsはWSL2）で、導入先をbind mountできるローカルDockerを使用してください。
 
-## 新規導入
+配布元はread-only、導入先の親だけを更新可能にし、`repositories/`はread-onlyでmountします。`--dry-run`では親もread-onlyです。生成fileは呼び出した利用者のUID/GIDで作成され、containerは処理後に削除されます。Dockerは導入処理専用です。導入後のCodex taskはホストで動き、stateless Git helperはその実行環境のPythonとGitを使います。
 
-導入先は既存の実Git working treeのrootを指定します。特別なGuild rootやrepositories/階層は不要です。
+## 配置と導入
+
+既存の非Git親ディレクトリを指定します。Git working tree内のdirectoryは導入先にできません。
+
+```text
+asked-root/                         ← 設定の導入先・Codexの起動場所
+├── AGENTS.md
+├── .codex/                         ← config.toml・named agents
+├── .agents/                        ← Skills・helper・install manifest
+└── repositories/
+    ├── asked_backend/              ← 実Git root
+    ├── asked_compose/              ← 実Git root
+    └── asked_frontend/             ← 実Git root
+```
 
 ~~~bash
 git clone https://github.com/nir-nmttg/agent-guild-orchestra.git
 cd agent-guild-orchestra
 make validate
 
-./scripts/install.sh --target /absolute/path/to/repository --dry-run
-./scripts/install.sh --target /absolute/path/to/repository --config-mode managed
+./scripts/install.sh --target /Users/nir-nmttg/Projects/achromono/asked-root --dry-run
+./scripts/install.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
 ~~~
 
-インストーラーはcanonical Git rootを照合し、書き込み前に全pathと衝突を検査します。AGENTS.mdはmarkerで囲まれた管理blockだけを更新し、block外を保持します。その他の配布ファイルは.agents/orchestra/install-manifest.jsonへ導入時hashを記録します。
+子repositoryへAGENTS.md、.codex、.agents、manifestを追加しません。子の既存file、Git index、Git設定、.gitignore、.git/info/excludeも変更しません。設定の配置場所を示す`guild_root`と、コード変更・Git操作の`target_repo_root`を分けます。
 
-`--config-mode managed`は配布元の`.codex/config.toml`を導入・更新し、`--config-mode user-owned`は既存の設定をbyte-identicalで保持してmanifestへownershipを記録します。user-ownedを選んだ場合も、配布物が要求するAstra model、`model_context_window = 1000000`、agents enabled/max2、multi_agent、`[features.context_management]`の`experimental_mode = true`を利用者が確認します。rootのreasoning effortはtask/sessionごとに利用者が選びます。installerの成功はファイル配置の成功であり、Codexへのactivationを意味しません。
+親のAGENTS.mdはmarker内の管理blockだけを更新します。その他の配布物の導入時hashと所有権は、親の`.agents/orchestra/install-manifest.json`（schema 2 / `layout: guild-parent`）へ記録します。
 
-## Codexでの有効化
+新規configと未変更の旧配布configはmanagedになります。既存の独自`.codex/config.toml`は既定でuser-ownedとしてbytes・modeを保持し、JSONの`next_steps`に必要設定を出力します。ユーザー設定の自動mergeは行いません。必要に応じて`--config-mode managed|user-owned`で指定できますが、managedへの切替でも独自設定は上書きせず衝突として停止します。
 
-導入後にtarget repositoryをCodexでtrustし、target rootから新しいtaskを開始します。そのfresh taskでeffective configuration、実際のRoot model/effort、named agent `adventurer` / `inquisitor`のdiscoveryを確認します。user-owned configやsessionのmodel/effort overrideは、配布defaultより優先されます。実際にeffective modelやpermissionが何だったかは、設定ファイルのparseだけでは証明できません。
+## Codexでの起動
+
+**Codexで非Git親のasked-rootを開いてtrustし、その親を作業場所とする新しいローカルtaskを開始してください。** CLIの場合は次の形です。
+
+~~~bash
+codex --cd /Users/nir-nmttg/Projects/achromono/asked-root
+~~~
+
+依頼には「`repositories/asked_backend`の実Git rootを対象に変更」のように対象を明示します。sessionの基点は親に保ち、子でのcommandはworkdirや`git -C`で指定します。子Git rootを直接開くと親の設定・Skill探索がGit境界で止まるため、この構成の起動方法にはしません。
+
+独自configを保持した場合は、Astra model、1M context、agents enabled/max2、multi_agent、experimental context managementを手動で整合させます。Guildmasterのeffortは利用者がtask/sessionで選びます。子のAGENTS指示はコード変更前に読み、既存の子config・Skill・named agentとの競合を確認します。installerは該当pathを`child_overrides`へ表示し、子設定を自動mergeしません。
+
+Codex 0.153.3で親のeffective config、AGENTS.md、五つのSkillの読み込みを確認しました。named agentの実呼び出しとlive permissionは未確認です。確認方法・設定継承の範囲・制約は[親配置の設計と検証](docs/parent-layout.md)に記載しています。ファイル配置の成功だけではactivation完了を意味しません。
 
 ## 更新
 
 ~~~bash
 git pull --ff-only
 make validate
-./scripts/sync.sh --target /absolute/path/to/repository --dry-run
-./scripts/sync.sh --target /absolute/path/to/repository
+./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root --dry-run
+./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
 ~~~
 
-導入先と新しい配布元の両方で同じmanaged fileが変わった場合、更新は衝突として停止します。導入先だけの変更は保持されます。更新はcandidateを先に組み立て、変更対象をtransaction backupへ退避してからatomicに反映し、途中で失敗すると元へ戻します。symlinkを経由する管理pathは拒否します。
+配布元だけの変更は更新し、導入先だけの変更は保持します。同じmanaged fileが両方で変わると、書き込み前に衝突として停止します。candidateの事前組立て・変更対象のbackup・各fileのatomic replaceを行い、途中の例外では復元します。symlinkを経由する管理pathは拒否します。
 
-2.4以前からの更新には--major-upgradeが必要です。旧版の標準的な非Git Guild rootを廃止して配下の実repositoryへ導入する場合は、`--legacy-root /absolute/old-guild-root`も明示します。詳細は[3.0移行ガイド](docs/migration-v3.md)を参照してください。
+旧親環境も同じ`--target`で更新します。確認できる旧配布fileだけを親内へ退避します。以前の子側v3配置の整理は、通常install/updateとは別の明示操作です。[移行ガイド](docs/migration-v3.md)を参照してください。
 
 ## Skill
 
@@ -69,7 +94,7 @@ maintainer向けのorchestra-contract-validationとorchestra-runtime-security-au
 
 ~~~bash
 ./scripts/install.sh --list-skills
-./scripts/install.sh --target /absolute/path/to/repository \
+./scripts/install.sh --target /absolute/path/to/asked-root \
   --with-skill create-skill-candidate-from-gap
 ~~~
 
@@ -97,7 +122,7 @@ make validate
 make install-dry-run
 ~~~
 
-validatorは配布構造とCodex設定をparseし、installerのfresh install、dry-run、update、optional package、v2 archive、衝突、symlink、transaction restoreを一時Git repoで実行します。snapshot/Git helperのpositive / negative testとmodel benchmark accountingのsynthetic smokeも実行します。
+validatorは配布構造とCodex設定をparseし、installerのfresh install、dry-run、update、optional package、v2 archive、衝突、symlink、transaction restoreを一時的な非Git親と子Git repoで実行します。子のfile・Git index/configの不変性と、明示的な子v3整理も検証します。snapshot/Git helperのpositive / negative testとmodel benchmark accountingのsynthetic smokeも実行します。
 
 モデル比較のoffline fixtureはrecord schemaと集計だけを検証します。品質、token削減、費用削減の証拠ではありません。実modelのpilot / holdout手順は[モデル選択評価](docs/model-selection-evaluation.md)にあります。このrelease作業では高額なlive benchmarkを実行していません。
 

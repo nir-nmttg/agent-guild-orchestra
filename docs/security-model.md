@@ -8,13 +8,15 @@ helperはJSON schema、path、Git状態の整合を検査します。OS access c
 
 ## Repository boundary
 
-すべてのhelperとinstallerはcallerが指定したabsolute targetをcanonical Git rootと照合します。cwd、repository名、親directoryの形から別targetを推測しません。特別なguild_root/repositories構造はありません。2.4からの移行でだけ、callerは別のabsolute `--legacy-root`を明示できます。このrootは非Git directoryかつtargetのancestorであることを検証し、既知の旧managed surfaceだけをcold archiveして無効化します。
+installerの`--target`は設定を置く非Git親（`guild_root`）です。Git working tree内への導入を拒否します。通常install/syncは親の管理pathだけを変更し、Dockerは`repositories/`をread-onlyにします。各子のfile、Git index/config、ignore ruleは更新しません。
 
-scope pathはtargetからのrelative pathとして正規化します。absolute path、..、symlink escape、別Git rootは拒否します。
+コード変更・Git操作のtargetは別の`target_repo_root`です。helperはこの明示されたabsolute pathを実Git rootと照合し、cwdや親の名前から別targetを推測しません。helper自体は親の`.agents/orchestra/scripts/`から読み込みます。scopeは子Git rootからのrelative pathです。absolute scope、..、symlink escape、別Git rootは拒否します。
+
+子v3の整理は通常導入と別の明示操作です。対象のschema 1 manifest/hash、未追跡状態を確認し、変更済み・追跡済みfileを保持します。子の.gitと外部Git metadataはread-onlyです。
 
 ## Installer
 
-source treeとdestinationのsymlinkを拒否し、preflight完了前にtargetへ書き込みません。managed hashは各導入先manifestの値だけをbaselineに使います。既存のunmanaged file、二方向に変更されたmanaged file、壊れたmanifestは衝突として停止します。
+source treeとdestinationのsymlinkを拒否し、preflight完了前にtargetへ書き込みません。v3のmanaged hashは各導入先manifestをbaselineに使います。manifestのないv2は既知の旧配布hashと一致するfileのみ自動整理し、変更済み・未知のfileや可変状態は保持します。既存のunmanaged file、二方向に変更されたmanaged file、壊れたmanifestは衝突として停止します。
 
 変更fileはtransaction backupへコピーし、各fileを同じfilesystem上のtemporary fileからreplaceします。途中の例外では元のfileとabsenceを復元します。v2 major upgradeのarchiveは復旧可能なcold copyで、active v3 runtimeから参照しません。
 
