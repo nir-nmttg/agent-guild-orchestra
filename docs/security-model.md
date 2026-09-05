@@ -22,8 +22,8 @@ source treeとdestinationのsymlinkを拒否し、preflight完了前にtargetへ
 
 Git操作の前にtarget、operation、scope、snapshot、preconditionを固定し、現在のhelper snapshotと比較します。stale snapshot、scope外path、期待しないbranch / HEAD / dirty stateでは操作しません。操作後は新しいsnapshotを証跡として返します。
 
-Git config、environment、hookなどがcommandをすり替えないようhelperは安全なenvironmentと明示optionを使います。system/global configは読み込まず、repository-local config include、content filter/process設定、working tree・index・`.git/info/attributes`の`filter`指定を、属性を評価しうる各Git subprocessの前に拒否します。`.gitattributes`によるEOL・binaryなどfilter以外の属性は利用できます。Git LFSを含むcontent filter使用repositoryはsnapshotもGit writeも明示的なunsupported errorで停止するため、filter変換後の内容をraw contentとして黙って扱うことも、filter commandを起動することもありません。それでもGit helperはrepository permissionそのものを与えません。復旧困難な操作やremote更新は通常の人間確認を省略できません。
+Git config、environment、hookなどがcommandをすり替えないようhelperは安全なenvironmentと明示optionを使います。local Git operationではhooksとsigningを明示的にskipします。通常のstatus/diff/snapshot/writeではsystem/global configを読み込まず、repository-local config include、content filter/process設定、working tree・index・`.git/info/attributes`の`filter`指定を、属性を評価しうる各Git subprocessの前に拒否します。commit identityの解決だけは狭い例外で、local/global/systemからeffective `user.name` / `user.email`だけを読み、redactした値を明示的にcommitへ渡します。`.gitattributes`によるEOL・binaryなどfilter以外の属性は利用できます。Git LFSを含むcontent filter使用repositoryはsnapshotもGit writeも明示的なunsupported errorで停止するため、filter変換後の内容をraw contentとして黙って扱うことも、filter commandを起動することもありません。tracked leaf symlinkもsnapshot/Git writeの対象外です。それでもGit helperはrepository permissionそのものを与えません。復旧困難な操作やremote更新は通常の人間確認を省略できません。
 
 ## 情報
 
-secret、token、credential、private key、個人情報をartifact、checkpoint、benchmark result、archive metadataへ意図的に記録しません。実データの代わりにsanitized fixtureを使います。security issueの報告先は[SECURITY.md](../SECURITY.md)です。
+secret、token、credential、private key、個人情報をartifact、checkpoint、benchmark result、archive metadataへ意図的に記録しません。credential-like filenameはworkerの固定heuristicで読み取り対象から除外しますが、これは秘密検出の完全性を保証するものではありません。実データの代わりにsanitized fixtureを使います。security issueの報告先は[SECURITY.md](../SECURITY.md)です。

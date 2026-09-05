@@ -134,6 +134,27 @@ class SnapshotDigestTests(unittest.TestCase):
             with self.assertRaises(snapshot_digest.SnapshotError):
                 snapshot_digest.compute_snapshot(repo, kind="working_tree_content", scope_paths=["src"], untracked_paths=[".env"])
 
+    def test_source_named_credentials_is_allowed_while_env_stays_protected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            credentials = repo / "src/credentials.py"
+            credentials.write_text("def load_credentials():\n    return {}\n", encoding="utf-8")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/credentials.py"],
+                untracked_paths=["src/credentials.py"],
+            )
+            self.assertEqual(snapshot["untracked_paths"], ["src/credentials.py"])
+            (repo / ".env").write_text("synthetic\n", encoding="utf-8")
+            with self.assertRaises(snapshot_digest.SnapshotError):
+                snapshot_digest.compute_snapshot(
+                    repo,
+                    kind="working_tree_content",
+                    scope_paths=[".env"],
+                    untracked_paths=[".env"],
+                )
+
     def test_stale_content_changes_digest_and_cli_emits_canonical_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = self.make_repo(Path(raw))

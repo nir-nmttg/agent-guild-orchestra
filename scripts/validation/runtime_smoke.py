@@ -16,7 +16,7 @@ def validate_runtime_smoke() -> None:
         capture_output=True,
     )
     require(suite.returncode == 0, f"guard test suite failed:\n{suite.stdout}\n{suite.stderr}")
-    for name in ("boundary_guard.py", "snapshot_digest.py", "git_guard.py"):
+    for name in ("snapshot_digest.py", "git_guard.py"):
         result = subprocess.run(
             [sys.executable, str(ROOT / "template/.agents/orchestra/scripts" / name), "--help"],
             cwd=ROOT,

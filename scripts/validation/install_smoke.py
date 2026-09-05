@@ -92,6 +92,7 @@ def validate_install_upgrade_smoke() -> None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         require(manifest["distribution_version"] == "3.0.0", "installed manifest version mismatch")
         require(manifest["selected_skills"] == ["create-skill-candidate-from-gap"], "optional Skill selection was not recorded")
+        require(manifest["ownership"] == {".codex/config.toml": "managed"}, "fresh install did not persist managed config ownership")
 
         stable_path = repo / ".agents/orchestra/README.md"
         stable_before = (stable_path.stat().st_ino, stable_path.stat().st_mtime_ns)
@@ -131,9 +132,71 @@ def validate_install_upgrade_smoke() -> None:
         distribution = copy_distribution(temp)
         changed_source = distribution / "template" / managed_rel
         changed_source.write_text(changed_source.read_text(encoding="utf-8") + "\ndistribution change\n", encoding="utf-8")
+        installer_for_conflict = load_installer()
+        agents_path = repo / "AGENTS.md"
+        agents_block = installer_for_conflict.extract_block(agents_path.read_text(encoding="utf-8"))
+        require(agents_block is not None, "fresh install did not write the managed AGENTS block")
+        local_agents_block = f"{installer_for_conflict.AGENTS_START}\nlocal managed block\n{installer_for_conflict.AGENTS_END}"
+        agents_path.write_text(
+            agents_path.read_text(encoding="utf-8").replace(agents_block, local_agents_block),
+            encoding="utf-8",
+        )
+        distribution_agents = distribution / "template/AGENTS.md"
+        distribution_agents_text = distribution_agents.read_text(encoding="utf-8")
+        distribution_agents_block = (
+            f"{installer_for_conflict.AGENTS_START}\n"
+            f"{distribution_agents_text.strip()}\n"
+            f"{installer_for_conflict.AGENTS_END}"
+        )
+        distribution_agents.write_text(
+            distribution_agents_block.replace(
+                distribution_agents_text.strip(),
+                "distribution managed block",
+            ) + "\n",
+            encoding="utf-8",
+        )
         conflict = run_install(repo, source=distribution / "template")
         require(conflict.returncode == 2 and "changed locally and in distribution" in conflict.stderr, "two-sided managed conflict was not rejected")
         require(managed_path.read_text(encoding="utf-8").endswith("local note\n"), "conflict path changed the target")
+        require("local managed block" in agents_path.read_text(encoding="utf-8"), "AGENTS conflict changed the target")
+
+        # Manual convergence to the new distribution is adopted for both a
+        # regular file and the managed AGENTS block, advancing the baseline.
+        converged_file = changed_source.read_bytes()
+        managed_path.write_bytes(converged_file)
+        converged_agents_block = installer_for_conflict.extract_block(distribution_agents.read_text(encoding="utf-8"))
+        require(converged_agents_block is not None, "converged distribution AGENTS block is missing")
+        agents_path.write_text(
+            agents_path.read_text(encoding="utf-8").replace(local_agents_block, converged_agents_block),
+            encoding="utf-8",
+        )
+        converged = run_install(repo, source=distribution / "template")
+        require(converged.returncode == 0, converged.stderr)
+        converged_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        require(
+            converged_manifest["files"][managed_rel.as_posix()]["sha256"] == installer_for_conflict.sha256_bytes(converged_file),
+            "regular-file convergence did not advance the manifest baseline",
+        )
+        require(
+            converged_manifest["files"]["AGENTS.md"]["sha256"] == installer_for_conflict.sha256_bytes(converged_agents_block.encode()),
+            "AGENTS convergence did not advance the manifest baseline",
+        )
+        converged_noop = run_install(repo, source=distribution / "template")
+        require(converged_noop.returncode == 0, converged_noop.stderr)
+        require(
+            all(item["action"] == "keep" for item in json.loads(converged_noop.stdout)["actions"]),
+            "converged install was not idempotent",
+        )
+
+        # A third, genuinely divergent edit on both sides must remain a
+        # conflict after the new baseline has been adopted.
+        managed_path.write_bytes(converged_file + b"\nthird local change\n")
+        changed_source.write_bytes(converged_file + b"\nthird distribution change\n")
+        third_conflict = run_install(repo, source=distribution / "template")
+        require(third_conflict.returncode == 2 and "changed locally and in distribution" in third_conflict.stderr, "third divergent edit was not rejected")
+        require(managed_path.read_bytes() == converged_file + b"\nthird local change\n", "third conflict changed the target")
+        managed_path.write_bytes(converged_file)
+        changed_source.write_bytes(converged_file)
 
         remove_optional = run_install(repo, "--without-skill", "create-skill-candidate-from-gap")
         require(remove_optional.returncode == 0, remove_optional.stderr)
@@ -229,11 +292,141 @@ def validate_install_upgrade_smoke() -> None:
         require((sibling_repo / "user-code.txt").read_text(encoding="utf-8") == "keep sibling repository\n", "sibling repository content changed")
         require((target_repo / ".agents/orchestra/install-manifest.json").is_file(), "v3 was not installed into the explicit child Git root")
 
+        multi_root = temp / "legacy-guild-root-two-children"
+        multi_root.mkdir()
+        child_one = multi_root / "repositories" / "one"
+        child_two = multi_root / "repositories" / "two"
+        child_one.mkdir(parents=True)
+        child_two.mkdir()
+        git(child_one, "init", "-q")
+        git(child_two, "init", "-q")
+        (child_one / "unmanaged.txt").write_text("child one content\n", encoding="utf-8")
+        (child_two / "unmanaged.txt").write_text("child two content\n", encoding="utf-8")
+        (multi_root / ".agents/orchestra/config").mkdir(parents=True)
+        (multi_root / ".agents/orchestra/config/settings.yaml").write_text("parent v2 config\n", encoding="utf-8")
+        (multi_root / ".orchestra/queue").mkdir(parents=True)
+        (multi_root / ".orchestra/queue/state.sqlite").write_bytes(b"two-child-parent-state")
+        (multi_root / "AGENTS.md").write_text(
+            "shared parent rules\n<!-- agent-guild-orchestra:start -->\nold parent block\n<!-- agent-guild-orchestra:end -->\n",
+            encoding="utf-8",
+        )
+        one_first = run_install(child_one)
+        two_first = run_install(child_two)
+        require(one_first.returncode == 0 and two_first.returncode == 0, f"normal child installs failed before parent cleanup: {one_first.stderr} {two_first.stderr}")
+        one_manifest_before_cleanup = (child_one / ".agents/orchestra/install-manifest.json").read_bytes()
+        two_manifest_before_cleanup = (child_two / ".agents/orchestra/install-manifest.json").read_bytes()
+        cleanup = run_install(child_one, "--major-upgrade", "--legacy-root", str(multi_root))
+        require(cleanup.returncode == 0, cleanup.stderr)
+        cleanup_plan = json.loads(cleanup.stdout)
+        require(any("sibling repository" in step for step in cleanup_plan["next_steps"]), "legacy-root cleanup omitted sibling-repository warning")
+        require(any("recursively discover" in step for step in cleanup_plan["next_steps"]), "legacy-root cleanup omitted bounded migration guidance")
+        require((child_one / ".agents/orchestra/install-manifest.json").read_bytes() == one_manifest_before_cleanup, "final parent cleanup changed child one manifest")
+        require((child_two / ".agents/orchestra/install-manifest.json").read_bytes() == two_manifest_before_cleanup, "final parent cleanup changed child two manifest")
+        require((child_one / "unmanaged.txt").read_text(encoding="utf-8") == "child one content\n", "final parent cleanup changed child one unmanaged content")
+        require((child_two / "unmanaged.txt").read_text(encoding="utf-8") == "child two content\n", "final parent cleanup changed child two unmanaged content")
+        require(not (multi_root / ".agents/orchestra").exists() and not (multi_root / ".orchestra/queue").exists(), "final parent cleanup left v2 parent runtime active")
+
         collision = new_repo(temp, "collision")
         (collision / ".codex").mkdir()
         (collision / ".codex/config.toml").write_text("user_config = true\n", encoding="utf-8")
         collided = run_install(collision)
         require(collided.returncode == 2 and "unmanaged destination collision" in collided.stderr, "unmanaged collision was overwritten")
+
+        config_owned = new_repo(temp, "config-owned")
+        config_path = config_owned / ".codex/config.toml"
+        config_path.parent.mkdir()
+        user_config = b"# user-owned config\nmodel = \"custom\"\n"
+        config_path.write_bytes(user_config)
+        config_path.chmod(0o600)
+        config_mode_before = config_path.stat().st_mode
+        owned = run_install(config_owned, "--config-mode", "user-owned")
+        require(owned.returncode == 0, owned.stderr)
+        require(config_path.read_bytes() == user_config and config_path.stat().st_mode == config_mode_before, "user-owned config was changed on fresh install")
+        owned_manifest_path = config_owned / ".agents/orchestra/install-manifest.json"
+        owned_manifest = json.loads(owned_manifest_path.read_text(encoding="utf-8"))
+        require(owned_manifest["ownership"] == {".codex/config.toml": "user-owned"}, "user-owned config ownership was not persisted")
+        require(".codex/config.toml" not in owned_manifest["files"], "user-owned config was recorded as a managed file")
+        owned_next_steps = json.loads(owned.stdout)["next_steps"]
+        require(any("model = \"gpt-6-astra\"" in step for step in owned_next_steps), "user-owned next_steps omitted required model setting")
+        require(any("[features]" in step and "multi_agent = true" in step for step in owned_next_steps), "user-owned next_steps omitted required multi-agent feature setting")
+        owned_again = run_install(config_owned)
+        require(owned_again.returncode == 0, owned_again.stderr)
+        require(config_path.read_bytes() == user_config and config_path.stat().st_mode == config_mode_before, "no-flag user-owned sync changed config bytes or mode")
+
+        switch_conflict = run_install(config_owned, "--config-mode", "managed")
+        require(switch_conflict.returncode == 2 and "unmanaged destination collision" in switch_conflict.stderr, "managed switch overwrote a user-owned config collision")
+        require(config_path.read_bytes() == user_config and config_path.stat().st_mode == config_mode_before, "managed collision changed user-owned config")
+        managed_config = (ROOT / "template/.codex/config.toml").read_bytes()
+        config_path.write_bytes(managed_config)
+        config_path.chmod(0o600)
+        switch_managed = run_install(config_owned, "--config-mode", "managed")
+        require(switch_managed.returncode == 0, switch_managed.stderr)
+        managed_manifest = json.loads(owned_manifest_path.read_text(encoding="utf-8"))
+        require(managed_manifest["ownership"] == {".codex/config.toml": "managed"}, "managed switch did not persist config ownership")
+        require(".codex/config.toml" in managed_manifest["files"], "managed switch did not record config")
+        managed_mode = config_path.stat().st_mode
+        config_bytes_before_user_switch = config_path.read_bytes()
+        switch_user = run_install(config_owned, "--config-mode", "user-owned")
+        require(switch_user.returncode == 0, switch_user.stderr)
+        require(config_path.read_bytes() == config_bytes_before_user_switch and config_path.stat().st_mode == managed_mode, "managed-to-user-owned switch changed config bytes or mode")
+        switched_manifest = json.loads(owned_manifest_path.read_text(encoding="utf-8"))
+        require(switched_manifest["ownership"] == {".codex/config.toml": "user-owned"}, "managed-to-user-owned switch lost ownership state")
+        require(".codex/config.toml" not in switched_manifest["files"], "managed-to-user-owned switch retained config in files")
+
+        malformed_manifest_repo = new_repo(temp, "malformed-manifest")
+        initial = run_install(malformed_manifest_repo)
+        require(initial.returncode == 0, initial.stderr)
+        malformed_path = malformed_manifest_repo / ".agents/orchestra/install-manifest.json"
+        valid_manifest = json.loads(malformed_path.read_text(encoding="utf-8"))
+        malformed_cases = []
+        duplicate_skills = json.loads(json.dumps(valid_manifest))
+        duplicate_skills["selected_skills"] = ["duplicate", "duplicate"]
+        malformed_cases.append((duplicate_skills, "selected_skills"))
+        unsafe_key = json.loads(json.dumps(valid_manifest))
+        unsafe_key["files"]["../escape"] = {"kind": "file", "sha256": "0" * 64}
+        malformed_cases.append((unsafe_key, "unsafe file key"))
+        unknown_kind = json.loads(json.dumps(valid_manifest))
+        first_file = next(iter(unknown_kind["files"]))
+        unknown_kind["files"][first_file]["kind"] = "unknown"
+        malformed_cases.append((unknown_kind, "unknown file kind"))
+        non_string_kind = json.loads(json.dumps(valid_manifest))
+        first_file = next(iter(non_string_kind["files"]))
+        non_string_kind["files"][first_file]["kind"] = ["file"]
+        malformed_cases.append((non_string_kind, "non-string file kind"))
+        invalid_digest = json.loads(json.dumps(valid_manifest))
+        first_file = next(iter(invalid_digest["files"]))
+        invalid_digest["files"][first_file]["sha256"] = "not-a-sha256"
+        malformed_cases.append((invalid_digest, "invalid sha256"))
+        invalid_ownership = json.loads(json.dumps(valid_manifest))
+        invalid_ownership["ownership"][".codex/config.toml"] = "shared"
+        malformed_cases.append((invalid_ownership, "config ownership"))
+        non_string_ownership = json.loads(json.dumps(valid_manifest))
+        non_string_ownership["ownership"][".codex/config.toml"] = ["managed"]
+        malformed_cases.append((non_string_ownership, "non-string config ownership"))
+        for malformed, label in malformed_cases:
+            malformed_path.write_text(json.dumps(malformed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            before_rejected_run = tree(malformed_manifest_repo)
+            rejected_manifest = run_install(malformed_manifest_repo)
+            require(rejected_manifest.returncode == 2 and "installed manifest" in rejected_manifest.stderr, f"{label} was not rejected as an InstallError")
+            require(tree(malformed_manifest_repo) == before_rejected_run, f"{label} changed the target")
+            malformed_path.write_text(json.dumps(valid_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        unsupported_manifest_repo = new_repo(temp, "unsupported-manifest-path")
+        installed = run_install(unsupported_manifest_repo)
+        require(installed.returncode == 0, installed.stderr)
+        ordinary_readme = unsupported_manifest_repo / "README.md"
+        ordinary_readme.write_bytes(b"ordinary user README\n")
+        unsupported_path = unsupported_manifest_repo / ".agents/orchestra/install-manifest.json"
+        unsupported_manifest = json.loads(unsupported_path.read_text(encoding="utf-8"))
+        unsupported_manifest["files"]["README.md"] = {
+            "kind": "file",
+            "sha256": load_installer().sha256_bytes(ordinary_readme.read_bytes()),
+        }
+        unsupported_path.write_text(json.dumps(unsupported_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        unsupported_before = tree(unsupported_manifest_repo)
+        unsupported_result = run_install(unsupported_manifest_repo)
+        require(unsupported_result.returncode == 2 and "unsupported file key" in unsupported_result.stderr, "unsupported manifest path was not rejected")
+        require(tree(unsupported_manifest_repo) == unsupported_before, "unsupported manifest path changed the target")
 
         escaped = new_repo(temp, "symlink")
         outside = temp / "outside"

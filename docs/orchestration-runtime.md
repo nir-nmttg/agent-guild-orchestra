@@ -1,35 +1,25 @@
 # v3 orchestration
 
-Agent Guild Orchestra 3はCodexのtemplate distributionです。独自のqueue、scheduler、database、inbox、status machineは動かしません。会話履歴とCodexのnative subagent / message機能が作業状態です。
+Agent Guild Orchestra 3はCodexのproject-local configuration、二つのcustom agent、core Skill、stateless Git/snapshot helperを配布します。会話履歴とCodex native task/messageが作業状態です。独自queue、scheduler、database、inbox、status machineはありません。
 
-## Root
+## Rootとdelegation
 
-RootはAstra / highをdefaultにします。利用者がsessionで別のsupported reasoning effortを指定した時は、その選択を尊重します。Rootは調査、編集、検証を直接行えます。
+RootはAstra / highをdefaultにし、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。
 
-委譲は作業量を増やすためではなく、独立して進められるsubtaskに使います。小さな修正や一続きの作業はRootが終えます。分離可能な実装が十分大きい場合、RootはAdventurerへobjective、success criteria、path scope、許可操作、必要な検証を渡します。共有fileを複数writerへ割り当てません。
+InquisitorはAstra / highのfresh independent read-only reviewerです。security、installer/runtime contract、Git/external publication、breaking compatibility、migration、広いblast radius、important unresolved questionのmaterial triggerでだけ使います。routine check failureを修復して再実行できたことだけでは起動しません。reviewが不要なlow-risk taskは直接完了できます。
 
-## Adventurer
+Rootはintegration前にtarget、全initial status/diff、planned writer unionを記録します。worker結果を統合した後、そのunionと実際の変更を照合し、pre-existing user editを保持します。union外の変更や帰属不明の変更を見つけたら停止して報告します。別writerの変更を自動revertしたり、attribution engineを作ったりしません。
 
-AdventurerはLuna / maxのbounded implementation workerです。割り当てられたpathと操作の中で実装し、関連するcheckを実行し、変更file、検証結果、残る問題をRootへ返します。追加agentは起動しません。
+## Native handoffとresult
 
-## Inquisitor
+handoffはpurpose、objective、acceptance criteria、target、owned scope、authorityだけを短く渡します。workerのresultはchanges、tests、unresolved issues、unrun checksと理由、snapshot evidence（取得した場合）を返します。大きなassignment/result/review schemaや常駐artifact workflowを追加しません。
 
-InquisitorはAstra / highのread-only reviewerです。security、installer、local Git helper、migration、公開互換性など、material riskを伴う変更でRootが独立確認を必要とする時に使います。routine check failureを修正して同じcheckが通っただけなら、必ずreviewを追加する規則はありません。
+Codexのworker上限は設定値であり、tokenやcostの上限ではありません。完了したworkerをcloseできるnative lifecycleが公開されている場合はreview前に閉じます。close機能がhostにない場合、空きslot不足を正確に報告し、cleanup serviceを発明しません。
 
-Inquisitorは実装を変更せず、観測したfile / line / command結果へfindingを結び、blockingかnonblockingかをRootが判断できる形で返します。実装者とreviewerを同じagentにしないことで、重要な仮定を独立に検査します。
+## Gitとsnapshot
 
-## Artifactとcheckpoint
+Git writeまたは明示的なstale-risk確認の時だけ`snapshot_digest`を使います。探索だけでsnapshotを作りません。`git_guard`はexact operation、target、scope、precondition、pre-snapshotを照合し、限定されたlocal Git write後にpost-snapshotを返します。両helperはcaller identityやrepository permissionを証明しません。
 
-boundary_guardはtask contract、assignment、result、review receipt、checkpointを検証できます。これらは必要な場合だけ使うJSON artifactであり、常駐workflowの状態ではありません。通常の作業はnative historyとmessageで足ります。
+content-unchanged stageは追加のmodel reviewを発生させません。hooksとsigningはhelperが明示的にskipします。Git LFS/content-filter repository、content filter/process設定、tracked leaf symlinkはsnapshot/Git writeのunsupported境界として停止します。credential-like filenameはworkerの固定heuristicで読み取り対象から除外し、結果へ内容を記録しません。
 
-長い作業のcheckpointにはtarget root、scope、現在のsnapshot、完了した検証、未解決事項、次の行動だけを入れます。raw transcript、secret、credential、個人情報を保存しません。
-
-## Gitと外部操作
-
-snapshot_digestが実Git状態からsnapshotを生成します。git_guardはexplicit operationとscope、事前snapshotを照合し、限定されたlocal Git操作の後に新しいsnapshotを返します。これらは対象取り違えとstale evidenceを検出します。caller identityや権限を証明するACLではありません。
-
-rebase、hard reset、clean、force updateなど復旧が難しい操作は通常の安全確認に従います。push、Pull Request、comment、deployなど外部状態を変える操作は、送信targetと内容を確認してから実行します。
-
-## 並行作業
-
-Codex設定はagents.enabledを有効にし、primary sessionを除く同時subagent数を2に制限します。この値はtoken / costの上限ではありません。Rootは依存関係のない作業だけを並行化し、writerの結果を統合してから全体検証を行います。
+通常の作業はnative historyで足ります。明示的な中断再開が必要な時だけ、target、scope、現在のsnapshot、完了check、unresolved issue、次のactionを含むsanitized checkpointを使います。

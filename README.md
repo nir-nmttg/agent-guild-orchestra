@@ -31,10 +31,16 @@ cd agent-guild-orchestra
 make validate
 
 ./scripts/install.sh --target /absolute/path/to/repository --dry-run
-./scripts/install.sh --target /absolute/path/to/repository
+./scripts/install.sh --target /absolute/path/to/repository --config-mode managed
 ~~~
 
 インストーラーはcanonical Git rootを照合し、書き込み前に全pathと衝突を検査します。AGENTS.mdはmarkerで囲まれた管理blockだけを更新し、block外を保持します。その他の配布ファイルは.agents/orchestra/install-manifest.jsonへ導入時hashを記録します。
+
+`--config-mode managed`は配布元の`.codex/config.toml`を導入・更新し、`--config-mode user-owned`は既存の設定をbyte-identicalで保持してmanifestへownershipを記録します。user-ownedを選んだ場合も、配布物が要求するAstra/high、agents enabled/max2、multi_agentの論理設定は利用者が確認します。installerの成功はファイル配置の成功であり、Codexへのactivationを意味しません。
+
+## Codexでの有効化
+
+導入後にtarget repositoryをCodexでtrustし、target rootから新しいtaskを開始します。そのfresh taskでeffective configuration、実際のRoot model/effort、named agent `adventurer` / `inquisitor`のdiscoveryを確認します。user-owned configやsessionのmodel/effort overrideは、配布defaultより優先されます。実際にeffective modelやpermissionが何だったかは、設定ファイルのparseだけでは証明できません。
 
 ## 更新
 
@@ -71,15 +77,16 @@ maintainer向けのorchestra-contract-validationとorchestra-runtime-security-au
 
 ## 安全境界とhelper
 
-.agents/orchestra/scripts/には三つのstateless helperがあります。
+.agents/orchestra/scripts/には二つのstateless helperがあります。
 
-- boundary_guard.py: explicit target、scope、authority、assignment / result / review / checkpointの整合を検査
 - snapshot_digest.py: actual Git rootとrevision / working tree / commit rangeのcanonical snapshotを発行
 - git_guard.py: snapshot、scope、operation、preconditionを照合して限定されたlocal Git操作を実行し、postcondition snapshotを返す
 
-helperはcallerの身元や権限を証明しません。sandboxとCodex approvalが実際の権限境界です。Git対象、scope、snapshot、assignment-result-review、checkpointを検査することで、古い根拠や別repoへの取り違えを防ぎます。
+helperはcallerの身元や権限を証明しません。sandboxとCodex approvalが実際の権限境界です。Git対象、scope、operation、pre/post snapshotを照合して、古い根拠や別repoへの取り違えを防ぎます。
 
-通常のcheckpointは会話履歴だけで十分です。長い作業を明示的に再開可能にする必要がある場合だけ、secretやraw logを含まないcheckpoint artifactを使います。
+通常のhandoffとcheckpointはnative task historyで足ります。明示的な再開境界が必要な場合だけ、secretやraw logを含まないsanitized checkpointを使います。
+
+Git hooksとsigningはhelperのlocal operationではskipされます。Git LFS/content-filter repository、content filter/process設定、tracked leaf symlinkはsnapshot/Git writeのunsupported境界です。credential-like filenameはworkerの固定heuristicで読み取り対象から除外されます。
 
 [runtime設計](docs/orchestration-runtime.md)と[security model](docs/security-model.md)に、委譲判断、独立review、Git操作、外部更新の扱いを記載しています。
 
@@ -90,7 +97,7 @@ make validate
 make install-dry-run
 ~~~
 
-validatorは配布構造とCodex設定をparseし、installerのfresh install、dry-run、update、optional package、v2 archive、衝突、symlink、transaction restoreを一時Git repoで実行します。guardのpositive / negative testとmodel benchmark accountingのoffline smokeも実行します。
+validatorは配布構造とCodex設定をparseし、installerのfresh install、dry-run、update、optional package、v2 archive、衝突、symlink、transaction restoreを一時Git repoで実行します。snapshot/Git helperのpositive / negative testとmodel benchmark accountingのsynthetic smokeも実行します。
 
 モデル比較のoffline fixtureはrecord schemaと集計だけを検証します。品質、token削減、費用削減の証拠ではありません。実modelのpilot / holdout手順は[モデル選択評価](docs/model-selection-evaluation.md)にあります。このrelease作業では高額なlive benchmarkを実行していません。
 

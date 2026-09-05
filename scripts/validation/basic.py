@@ -42,7 +42,6 @@ def validate_required_paths() -> None:
         "template/.codex/config.toml",
         "template/.codex/agents/adventurer.toml",
         "template/.codex/agents/inquisitor.toml",
-        "template/.agents/orchestra/scripts/boundary_guard.py",
         "template/.agents/orchestra/scripts/snapshot_digest.py",
         "template/.agents/orchestra/scripts/git_guard.py",
     ]
@@ -58,14 +57,17 @@ def validate_required_paths() -> None:
 def validate_codex_config() -> None:
     with (ROOT / "template/.codex/config.toml").open("rb") as handle:
         config = tomllib.load(handle)
+    require(set(config) == {"model", "model_reasoning_effort", "agents", "features"}, "config must keep only distribution-owned settings")
     require(config.get("model") == "gpt-6-astra", "root model must be gpt-6-astra")
     require(config.get("model_reasoning_effort") == "high", "root effort must default to high")
     require("model_context_window" not in config and "model_auto_compact_token_limit" not in config, "v3 must not pin context limits")
     agents_config = config.get("agents")
     require(isinstance(agents_config, dict), "config needs an [agents] table")
+    require(set(agents_config) == {"enabled", "max_concurrent_threads_per_session"}, "agents config has unrelated settings")
     require(agents_config.get("enabled") is True, "agents.enabled must be true")
     require(agents_config.get("max_concurrent_threads_per_session") == 2, "max concurrent subagent threads must be 2")
-    require("max_threads" not in agents_config and "max_depth" not in agents_config, "undocumented agent settings are forbidden")
+    features_config = config.get("features")
+    require(isinstance(features_config, dict) and features_config == {"multi_agent": True}, "multi_agent feature must be enabled explicitly")
     for name, (model, effort, sandbox) in AGENTS.items():
         path = ROOT / "template/.codex/agents" / f"{name}.toml"
         with path.open("rb") as handle:
@@ -90,7 +92,7 @@ def validate_no_retired_runtime() -> None:
         path = ROOT / rel
         material = path.is_file() or (path.is_dir() and any(item.is_file() for item in path.rglob("*")))
         require(not material, f"retired runtime remains active: {rel}")
-    allowed_scripts = {"boundary_guard.py", "snapshot_digest.py", "git_guard.py"}
+    allowed_scripts = {"snapshot_digest.py", "git_guard.py"}
     scripts = {path.name for path in (ROOT / "template/.agents/orchestra/scripts").iterdir() if path.is_file()}
     require(scripts == allowed_scripts, f"unexpected runtime scripts: {scripts}")
 

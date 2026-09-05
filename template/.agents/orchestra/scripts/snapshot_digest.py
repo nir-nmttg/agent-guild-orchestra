@@ -14,11 +14,26 @@ import shutil
 import stat
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 
 DIGEST_VERSION = "agent-guild-orchestra-snapshot-v1"
 KINDS = {"revision_only", "working_tree_content", "commit_range"}
+SNAPSHOT_FIELDS = {
+    "snapshot_id",
+    "digest_version",
+    "kind",
+    "revision_id",
+    "base_ref",
+    "head_ref",
+    "scope_paths",
+    "untracked_paths",
+    "dirty_state",
+    "diff_hash",
+}
+SHA256_ID_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+COMMIT_OID_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 MAX_GIT_CONFIG_BYTES = 1_000_000
 MAX_GIT_ATTRIBUTES_BYTES = 1_000_000
 MAX_GIT_ATTRIBUTE_FILES = 1_024
@@ -56,6 +71,12 @@ PSEUDO_REFS = {
 
 class SnapshotError(RuntimeError):
     """snapshot の入力または対象状態が安全に処理できない。"""
+
+
+def _mapping(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SnapshotError(f"{label} はobjectにしてください。")
+    return dict(value)
 
 
 def _git_safe_environment() -> dict[str, str]:
@@ -118,6 +139,74 @@ def _assert_safe_local_git_config(repo: Path) -> str:
     return config_text
 
 
+def _identity_environment() -> dict[str, str]:
+    """Build an environment for read-only identity lookup.
+
+    The write/snapshot helper intentionally suppresses every Git environment
+    override.  Identity lookup needs Git's configured local/global/system
+    values, so it uses the same fixed executable/PATH discipline while
+    retaining the normal config search locations and still removing all
+    caller-provided ``GIT_*`` overrides.
+    """
+
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update({"PATH": os.defpath, "GIT_PAGER": "cat", "GIT_OPTIONAL_LOCKS": "0"})
+    return environment
+
+
+def _configured_identity_value(repo: Path, scope: str, key: str) -> str | None:
+    if _GIT_BINARY is None:
+        raise SnapshotError("Git executable が見つかりません。")
+    try:
+        result = subprocess.run(
+            [_GIT_BINARY, "--no-pager", "config", f"--{scope}", "--get", key],
+            cwd=repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=_identity_environment(),
+            input=None,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SnapshotError("Git identity configを安全に確認できません。") from exc
+    if result.returncode == 1:
+        return None
+    if result.returncode != 0:
+        raise SnapshotError("Git identity configを安全に確認できません。")
+    try:
+        value = result.stdout.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise SnapshotError("Git identity configをUTF-8として安全に読めません。") from exc
+    if value.endswith("\n"):
+        value = value[:-1]
+    if not value.strip() or "\n" in value or "\r" in value or "\0" in value:
+        raise SnapshotError("Git identity configに安全な user.name / user.email がありません。")
+    return value
+
+
+def resolve_git_identity(repo: Path) -> tuple[str, str]:
+    """Resolve the effective commit identity without exposing its values.
+
+    Local config wins over global, which wins over system config.  The
+    returned values are consumed only as explicit ``-c user.*=...`` arguments
+    by ``git_guard``; no identity value is included in helper evidence or
+    errors.
+    """
+
+    _assert_safe_local_git_config(repo)
+    resolved: dict[str, str] = {}
+    for key in ("user.name", "user.email"):
+        for scope in ("local", "global", "system"):
+            value = _configured_identity_value(repo, scope, key)
+            if value is not None:
+                resolved[key] = value
+                break
+        if key not in resolved:
+            raise SnapshotError("Git identity configに安全な user.name / user.email がありません。")
+    return resolved["user.name"], resolved["user.email"]
+
+
 def _invoke_git(repo: Path, args: list[str], *, check: bool = True, input_data: bytes | None = None) -> bytes:
     if _GIT_BINARY is None:
         raise SnapshotError("Git executable が見つかりません。")
@@ -156,10 +245,10 @@ def _invoke_git(repo: Path, args: list[str], *, check: bool = True, input_data: 
             timeout=30,
         )
     except subprocess.TimeoutExpired as exc:
-        raise SnapshotError(f"git {' '.join(args)} timed out") from exc
+        raise SnapshotError(f"git {' '.join(_redacted_git_args(args))} timed out") from exc
     if check and result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise SnapshotError(f"git {' '.join(args)} failed ({result.returncode}): {detail}")
+        raise SnapshotError(f"git {' '.join(_redacted_git_args(args))} failed ({result.returncode}): {detail}")
     return result.stdout
 
 
@@ -264,16 +353,63 @@ def _assert_no_index_filter_attributes(repo: Path) -> None:
             raise SnapshotError("index内Git attributesのcontent filter指定はhelperでは対応しません。")
 
 
-def _run(repo: Path, args: list[str], *, check: bool = True, input_data: bytes | None = None) -> bytes:
+def _git_subcommand(args: Sequence[str]) -> str | None:
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument in {"-c", "--config-env"}:
+            index += 2
+            continue
+        if argument.startswith("-c") and argument != "-c":
+            index += 1
+            continue
+        if argument.startswith("-"):
+            index += 1
+            continue
+        return argument
+    return None
+
+
+def _redacted_git_args(args: Sequence[str]) -> list[str]:
+    redacted: list[str] = []
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == "-c" and index + 1 < len(args):
+            config = args[index + 1]
+            if config.startswith("user.name="):
+                config = "user.name=<redacted>"
+            elif config.startswith("user.email="):
+                config = "user.email=<redacted>"
+            redacted.extend((argument, config))
+            index += 2
+            continue
+        if argument.startswith("-cuser.name="):
+            redacted.append("-cuser.name=<redacted>")
+        elif argument.startswith("-cuser.email="):
+            redacted.append("-cuser.email=<redacted>")
+        else:
+            redacted.append(argument)
+        index += 1
+    return redacted
+
+
+def run_git(repo: Path, args: list[str], *, check: bool = True, input_data: bytes | None = None) -> bytes:
     # Git evaluates clean/process filters for commands including status, diff,
     # switch, and add. Check both working-tree and index attributes before any
     # such command so globally configured LFS/filter drivers cannot silently
     # transform content even though host configuration is disabled below.
     _assert_safe_local_git_config(repo)
-    if args and args[0] in {"add", "apply", "commit", "diff", "restore", "status", "switch"}:
+    if _git_subcommand(args) in {"add", "apply", "commit", "diff", "restore", "status", "switch"}:
         _assert_no_worktree_filter_attributes(repo)
         _assert_no_index_filter_attributes(repo)
     return _invoke_git(repo, args, check=check, input_data=input_data)
+
+
+def _run(repo: Path, args: list[str], *, check: bool = True, input_data: bytes | None = None) -> bytes:
+    """Internal compatibility wrapper for the snapshot implementation."""
+
+    return run_git(repo, args, check=check, input_data=input_data)
 
 
 def _assert_regular_if_present(path: Path, *, label: str, required: bool = False) -> None:
@@ -408,6 +544,21 @@ def _linked_worktree_git_directory(repo: Path, dot_git: Path) -> tuple[Path, Pat
     return git_directory, common_directory
 
 
+def _resolve_git_directories_for_root(repo: Path) -> tuple[Path, Path]:
+    """Return (worktree Git dir, common Git dir) for an existing root."""
+
+    dot_git = repo / ".git"
+    try:
+        git_mode = dot_git.lstat().st_mode
+    except OSError as exc:
+        raise SnapshotError(f".gitを確認できません: {exc}") from exc
+    if stat.S_ISDIR(git_mode) and not stat.S_ISLNK(git_mode):
+        return dot_git, dot_git
+    if stat.S_ISREG(git_mode) and not stat.S_ISLNK(git_mode):
+        return _linked_worktree_git_directory(repo, dot_git)
+    raise SnapshotError(".gitは実directoryまたは検証可能なlinked worktree pointerにしてください。")
+
+
 def _repo_root(value: str) -> Path:
     if not isinstance(value, str) or not value or "\0" in value or "\n" in value or "\r" in value:
         raise SnapshotError("repo は改行/NULを含まないabsolute pathにしてください。")
@@ -440,17 +591,7 @@ def _repo_root(value: str) -> Path:
     candidate = raw.resolve(strict=False)
     if not candidate.is_dir():
         raise SnapshotError(f"repo が directory ではありません: {candidate}")
-    git_directory = candidate / ".git"
-    try:
-        git_mode = git_directory.lstat().st_mode
-    except OSError as exc:
-        raise SnapshotError(f".gitを確認できません: {exc}") from exc
-    if stat.S_ISDIR(git_mode) and not stat.S_ISLNK(git_mode):
-        common_directory = git_directory
-    elif stat.S_ISREG(git_mode) and not stat.S_ISLNK(git_mode):
-        git_directory, common_directory = _linked_worktree_git_directory(candidate, git_directory)
-    else:
-        raise SnapshotError(".gitは実directoryまたは検証可能なlinked worktree pointerにしてください。")
+    git_directory, common_directory = _resolve_git_directories_for_root(candidate)
     _assert_internal_git_tree(common_directory)
     # `_run` repeats this immediately before every Git subprocess. Keeping a
     # check here also makes canonical-root validation fail without launching
@@ -495,6 +636,12 @@ def _resolve_commit(repo: Path, value: str, *, label: str) -> str:
     return resolved
 
 
+def resolve_commit(repo: Path, value: str, *, label: str) -> str:
+    """Resolve one caller-supplied commit ref through the safe Git helper."""
+
+    return _resolve_commit(repo, value, label=label)
+
+
 def _safe_relative(value: str, *, label: str) -> str:
     if not isinstance(value, str) or "\0" in value or "\n" in value or "\r" in value or "\\" in value:
         raise SnapshotError(f"{label} は単一の repo-relative path にしてください。")
@@ -514,16 +661,20 @@ def _safe_relative(value: str, *, label: str) -> str:
         raise SnapshotError(f"{label} はcanonical repo-relative pathにしてください: {value}")
     for part in path.parts:
         folded = part.casefold()
-        stem = PurePosixPath(part).stem.casefold()
         if (
             folded in SECRET_COMPONENTS
-            or stem in SECRET_COMPONENTS
             or folded.startswith(".env.")
             or PurePosixPath(part).suffix.casefold() in SECRET_SUFFIXES
             or PII_PATTERN.search(folded)
         ):
             raise SnapshotError(f"{label} は secret-like / PII-like path のため読み取りません: {normalized}")
     return normalized
+
+
+def safe_relative(value: str, *, label: str) -> str:
+    """Validate and canonicalize one repo-relative path for runtime callers."""
+
+    return _safe_relative(value, label=label)
 
 
 def _nul_paths(raw: bytes, *, label: str) -> list[str]:
@@ -533,6 +684,79 @@ def _nul_paths(raw: bytes, *, label: str) -> list[str]:
             continue
         values.append(_safe_relative(item.decode("utf-8", errors="strict"), label=label))
     return values
+
+
+def nul_paths(raw: bytes, *, label: str) -> list[str]:
+    """Decode NUL-delimited Git paths through the same path policy."""
+
+    return _nul_paths(raw, label=label)
+
+
+def _snapshot_path_list(value: Any, label: str) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise SnapshotError(f"{label} はpath文字列のlistにしてください。")
+    paths = [safe_relative(item, label=f"{label}[{index}]") for index, item in enumerate(value)]
+    if len(paths) != len(set(paths)):
+        raise SnapshotError(f"{label} に重複pathがあります。")
+    return sorted(paths, key=lambda item: item.encode("utf-8"))
+
+
+def snapshot_shape(value: Any, label: str = "snapshot") -> dict[str, Any]:
+    """Validate and return one canonical helper-issued snapshot mapping."""
+
+    snapshot = _mapping(value, label)
+    if set(snapshot) != SNAPSHOT_FIELDS:
+        raise SnapshotError(f"{label} はcanonical snapshot fieldsにしてください。")
+    if snapshot.get("digest_version") != DIGEST_VERSION or not isinstance(snapshot.get("kind"), str) or snapshot.get("kind") not in KINDS:
+        raise SnapshotError(f"{label}.digest_version/kindが不正です。")
+    if not isinstance(snapshot.get("snapshot_id"), str) or SHA256_ID_RE.fullmatch(snapshot["snapshot_id"]) is None:
+        raise SnapshotError(f"{label}.snapshot_id はhelper形式sha256で指定してください。")
+    if not isinstance(snapshot.get("revision_id"), str) or COMMIT_OID_RE.fullmatch(snapshot["revision_id"]) is None:
+        raise SnapshotError(f"{label}.revision_id はcommit OIDで指定してください。")
+    if snapshot.get("dirty_state") not in {"clean", "dirty"}:
+        raise SnapshotError(f"{label}.dirty_state が不正です。")
+    for key in ("scope_paths", "untracked_paths"):
+        paths = _snapshot_path_list(snapshot.get(key), f"{label}.{key}")
+        if paths != snapshot[key]:
+            raise SnapshotError(f"{label}.{key} はcanonical byte順にしてください。")
+    for key in ("base_ref", "head_ref"):
+        raw = snapshot.get(key)
+        if raw is not None and (not isinstance(raw, str) or COMMIT_OID_RE.fullmatch(raw) is None):
+            raise SnapshotError(f"{label}.{key} はnullまたはcommit OIDにしてください。")
+    kind = snapshot["kind"]
+    if kind == "revision_only":
+        if (
+            snapshot["base_ref"] is not None
+            or snapshot["head_ref"] is not None
+            or snapshot["scope_paths"]
+            or snapshot["untracked_paths"]
+            or snapshot["dirty_state"] != "clean"
+            or snapshot["diff_hash"] is not None
+        ):
+            raise SnapshotError(f"{label}: revision_onlyのcanonical fieldsが不正です。")
+    elif kind == "working_tree_content":
+        if (
+            snapshot["base_ref"] is None
+            or snapshot["head_ref"] is not None
+            or not snapshot["scope_paths"]
+            or not isinstance(snapshot["diff_hash"], str)
+            or snapshot["diff_hash"] != snapshot["snapshot_id"]
+        ):
+            raise SnapshotError(f"{label}: working_tree_contentのcanonical fieldsが不正です。")
+    elif (
+        snapshot["base_ref"] is None
+        or snapshot["head_ref"] is None
+        or not snapshot["scope_paths"]
+        or snapshot["untracked_paths"]
+        or not isinstance(snapshot["diff_hash"], str)
+        or snapshot["diff_hash"] != snapshot["snapshot_id"]
+    ):
+        raise SnapshotError(f"{label}: commit_rangeのcanonical fieldsが不正です。")
+    if snapshot["diff_hash"] is not None and (
+        not isinstance(snapshot["diff_hash"], str) or SHA256_ID_RE.fullmatch(snapshot["diff_hash"]) is None
+    ):
+        raise SnapshotError(f"{label}.diff_hash が不正です。")
+    return snapshot
 
 
 def _path_is_within_scope(path: str, scopes: list[str]) -> bool:
@@ -808,10 +1032,49 @@ def compute_snapshot(
     return build_snapshot(args)
 
 
+def recompute_snapshot(target_repo_root: str | Path, snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """Reissue and compare a canonical snapshot against the current Git state."""
+
+    root = canonical_target_root(target_repo_root)
+    shaped = snapshot_shape(snapshot)
+    try:
+        actual = compute_snapshot(
+            root,
+            kind=str(shaped["kind"]),
+            base_ref=shaped.get("base_ref"),
+            head_ref=shaped.get("head_ref"),
+            scope_paths=list(shaped["scope_paths"]),
+            untracked_paths=list(shaped["untracked_paths"]),
+        )
+    except (SnapshotError, OSError, UnicodeError, ValueError) as exc:
+        raise SnapshotError(f"snapshotをtarget Git rootで再計算できません: {exc}") from exc
+    if actual != shaped:
+        raise SnapshotError("helper-issued snapshotとtargetのactual Git stateが一致しません。")
+    return actual
+
+
 def canonical_repo_root(repo: str | Path) -> Path:
     """Validate and return an explicit canonical Git worktree root."""
 
     return _repo_root(str(repo))
+
+
+def canonical_target_root(repo: str | Path) -> Path:
+    """Validate and return the canonical target root used by runtime writes."""
+
+    return canonical_repo_root(repo)
+
+
+def resolve_git_directories(repo: str | Path) -> tuple[Path, Path]:
+    """Return the validated worktree and common Git directories.
+
+    For an ordinary worktree both values are the repository's ``.git``
+    directory.  For a linked worktree the first value is its per-worktree
+    directory and the second is the primary repository's common directory.
+    """
+
+    root = canonical_repo_root(repo)
+    return _resolve_git_directories_for_root(root)
 
 
 def _parser() -> argparse.ArgumentParser:

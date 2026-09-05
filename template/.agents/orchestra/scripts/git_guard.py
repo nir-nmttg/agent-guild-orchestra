@@ -11,18 +11,20 @@ actual authority.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
+import stat
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 try:  # direct execution and package-style imports
-    from . import boundary_guard, snapshot_digest  # type: ignore
+    from . import snapshot_digest  # type: ignore
 except ImportError:  # pragma: no cover - exercised by the CLI
-    import boundary_guard  # type: ignore
     import snapshot_digest  # type: ignore
 
 
@@ -111,7 +113,7 @@ def _scope(contract: Mapping[str, Any]) -> dict[str, Any]:
 
 def _safe_path(value: Any, label: str) -> str:
     try:
-        return snapshot_digest._safe_relative(value, label=label)  # type: ignore[attr-defined]
+        return snapshot_digest.safe_relative(value, label=label)
     except (snapshot_digest.SnapshotError, TypeError, ValueError) as exc:
         raise GitGuardError(str(exc), code="unsafe_path") from exc
 
@@ -175,15 +177,15 @@ def _validate_contract(contract_value: Mapping[str, Any], operation: str | None 
         raise GitGuardError(f"operationがforbidden_operationsに含まれています: {selected}", code="unsupported")
     target = _extract(contract, "target_repo_root", "authorization")
     try:
-        root = boundary_guard.canonical_target_root(_string(target, "target_repo_root"))
-    except boundary_guard.BoundaryError as exc:
+        root = snapshot_digest.canonical_target_root(_string(target, "target_repo_root"))
+    except snapshot_digest.SnapshotError as exc:
         raise GitGuardError(str(exc), code="invalid_target_root") from exc
     raw_snapshot = _extract(contract, "subject_snapshot", "authorization")
     if raw_snapshot is None:
         raise GitGuardError("subject_snapshot がありません。", code="stale_evidence")
     try:
-        snapshot = boundary_guard._snapshot_shape(raw_snapshot, "subject_snapshot")  # type: ignore[attr-defined]
-    except boundary_guard.BoundaryError as exc:
+        snapshot = snapshot_digest.snapshot_shape(raw_snapshot, "subject_snapshot")
+    except snapshot_digest.SnapshotError as exc:
         raise GitGuardError(str(exc), code="invalid_snapshot") from exc
     scope = _scope(contract)
     preconditions = _extract(contract, "preconditions")
@@ -203,7 +205,7 @@ def _validate_contract(contract_value: Mapping[str, Any], operation: str | None 
 
 def _git(repo: Path, args: list[str], *, check: bool = True, input_data: bytes | None = None) -> bytes:
     try:
-        return snapshot_digest._run(repo, args, check=check, input_data=input_data)  # type: ignore[attr-defined]
+        return snapshot_digest.run_git(repo, args, check=check, input_data=input_data)
     except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
         raise GitGuardError(str(exc), code="git_failed") from exc
 
@@ -217,8 +219,8 @@ def _git_text(repo: Path, args: list[str], *, check: bool = True) -> str:
 
 def _preflight_snapshot(root: Path, expected: Mapping[str, Any]) -> dict[str, Any]:
     try:
-        actual = boundary_guard.recompute_snapshot(root, expected)
-    except boundary_guard.BoundaryError as exc:
+        actual = snapshot_digest.recompute_snapshot(root, expected)
+    except snapshot_digest.SnapshotError as exc:
         raise GitGuardError(str(exc), code="stale_evidence") from exc
     if actual != dict(expected):
         raise GitGuardError("preflight helper snapshotがassignment snapshotと一致しません。", code="stale_evidence")
@@ -230,23 +232,36 @@ def _post_snapshot(root: Path, expected: Mapping[str, Any]) -> dict[str, Any]:
     # this yields the new revision; for index-only stage/unstage it proves the
     # worktree content did not drift.
     try:
-        shaped = boundary_guard._snapshot_shape(expected, "postwrite source snapshot")  # type: ignore[attr-defined]
+        shaped = snapshot_digest.snapshot_shape(expected, "postwrite source snapshot")
+        untracked_paths = list(shaped["untracked_paths"])
+        if shaped["kind"] == "working_tree_content":
+            untracked_paths = _actual_untracked_paths(root, list(shaped["scope_paths"]))
         return snapshot_digest.compute_snapshot(
             root,
             kind=str(shaped["kind"]),
             base_ref=shaped.get("base_ref"),
             head_ref=shaped.get("head_ref"),
             scope_paths=list(shaped["scope_paths"]),
-            untracked_paths=list(shaped["untracked_paths"]),
+            untracked_paths=untracked_paths,
         )
-    except (boundary_guard.BoundaryError, snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
+    except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
         raise GitGuardError(f"post-write snapshotを発行できません: {exc}", code="postcondition_failed") from exc
 
 
 def _status(repo: Path) -> tuple[str, set[str]]:
-    raw = _git(repo, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
-    # NUL records contain XY + space + path.  Rename records have a second
-    # path; include both so an unrelated rename cannot hide in the index.
+    raw = _git(
+        repo,
+        [
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--no-renames",
+            "--untracked-files=normal",
+        ],
+    )
+    # --no-renames expands a rename/copy into endpoint records. Each NUL
+    # record then contains XY + space + path, so neither endpoint can hide in
+    # the index status set.
     records = [item for item in raw.split(b"\0") if item]
     paths: set[str] = set()
     for record in records:
@@ -264,7 +279,7 @@ def _status(repo: Path) -> tuple[str, set[str]]:
 
 
 def _staged_paths(repo: Path) -> set[str]:
-    raw = _git(repo, ["diff", "--cached", "--name-only", "-z", "--no-ext-diff", "--no-textconv"])
+    raw = _git(repo, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"])
     result: set[str] = set()
     for item in raw.split(b"\0"):
         if item:
@@ -278,6 +293,32 @@ def _ensure_no_unrelated_staged(repo: Path, paths: Sequence[str]) -> set[str]:
         outside = sorted(path for path in staged if not _covered(path, paths))
         raise GitGuardError(f"unrelated staged pathがあります: {outside[0]}", code="scope_expansion")
     return staged
+
+
+def _outside_staged(staged: set[str], paths: Sequence[str]) -> set[str]:
+    return {path for path in staged if not _covered(path, paths)}
+
+
+def _staged_index_fingerprint(repo: Path, staged: set[str], paths: Sequence[str]) -> bytes:
+    outside = sorted(_outside_staged(staged, paths), key=lambda item: item.encode("utf-8"))
+    if not outside:
+        return b""
+    return _git(repo, ["ls-files", "-s", "-z", "--", *outside])
+
+
+def _ensure_outside_staged_unchanged(
+    repo: Path,
+    before: set[str],
+    after: set[str],
+    paths: Sequence[str],
+    before_index: bytes,
+) -> None:
+    before_outside = _outside_staged(before, paths)
+    after_outside = _outside_staged(after, paths)
+    if before_outside != after_outside:
+        raise GitGuardError("operationが対象外のstaged pathを変更しました。", code="postcondition_failed")
+    if before_index != _staged_index_fingerprint(repo, after, paths):
+        raise GitGuardError("operationが対象外のindex内容を変更しました。", code="postcondition_failed")
 
 
 def _ensure_no_symlink_path(root: Path, rel: str, *, reject_directory: bool = False) -> None:
@@ -321,10 +362,26 @@ def _ref(scope: Mapping[str, Any], contract: Mapping[str, Any], key: str, label:
 def _assert_no_operation_state(repo: Path) -> None:
     # These are repository-local state markers, not user content.  Refuse a
     # write in the middle of another history operation.
-    dot_git = repo / ".git"
-    if dot_git.is_dir() and not dot_git.is_symlink():
-        candidates = [dot_git / name for name in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-apply", "rebase-merge", "sequencer")]
-        if any(path.exists() for path in candidates):
+    try:
+        worktree_git, common_git = snapshot_digest.resolve_git_directories(repo)
+    except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
+        raise GitGuardError(f"Git metadataを安全に確認できません: {exc}", code="precondition_failed") from exc
+    directories: list[Path] = []
+    for directory in (common_git, worktree_git):
+        if directory not in directories:
+            directories.append(directory)
+    marker_names = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-apply", "rebase-merge", "sequencer")
+    for directory in directories:
+        for name in marker_names:
+            marker = directory / name
+            try:
+                mode = marker.lstat().st_mode
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise GitGuardError("Git operation state markerを安全に確認できません。", code="precondition_failed") from exc
+            if stat.S_ISLNK(mode) or not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                raise GitGuardError("Git operation state markerが安全な通常file/directoryではありません。", code="precondition_failed")
             raise GitGuardError("merge/rebase/cherry-pick state中はGit writeできません。", code="precondition_failed")
 
 
@@ -348,7 +405,7 @@ def _run_branch_create(root: Path, contract: Mapping[str, Any], scope: Mapping[s
     if branches.strip() == new_branch:
         raise GitGuardError("new_branchが既に存在します。", code="unsafe_ref")
     try:
-        resolved_base = snapshot_digest._resolve_commit(root, base_ref, label="base_ref")  # type: ignore[attr-defined]
+        resolved_base = snapshot_digest.resolve_commit(root, base_ref, label="base_ref")
     except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
         raise GitGuardError(str(exc), code="unsafe_ref") from exc
     _git(root, ["switch", "--no-guess", "--create", new_branch, resolved_base])
@@ -440,7 +497,9 @@ def _patch_input(contract: Mapping[str, Any], patch: bytes | str | None) -> byte
 
 def _run_stage(root: Path, contract: Mapping[str, Any], paths: Sequence[str], patch: bytes | str | None) -> dict[str, Any]:
     _assert_branch_clean_state(root, require_branch=True)
-    before = _ensure_no_unrelated_staged(root, paths)
+    before = _staged_paths(root)
+    before_index = _staged_index_fingerprint(root, before, paths)
+    before_content = _worktree_fingerprints(root, paths)
     patch_bytes = _patch_input(contract, patch)
     for path in paths:
         _ensure_no_symlink_path(root, path, reject_directory=patch_bytes is None)
@@ -455,29 +514,92 @@ def _run_stage(root: Path, contract: Mapping[str, Any], paths: Sequence[str], pa
             raise GitGuardError(f"scope-bound patchを適用できません: {exc}", code="unsafe_patch") from exc
     else:
         _git(root, ["add", "--", *paths])
-    after = _ensure_no_unrelated_staged(root, paths)
-    if not after.issuperset(before):
-        raise GitGuardError("stage後に既存staged pathが失われました。", code="postcondition_failed")
+    after = _staged_paths(root)
+    _ensure_outside_staged_unchanged(root, before, after, paths, before_index)
+    after_content = _worktree_fingerprints(root, paths)
+    if before_content != after_content:
+        raise GitGuardError("stageがworktree contentを変更しました。", code="postcondition_failed")
     return {"staged_paths": sorted(after, key=lambda item: item.encode("utf-8"))}
 
 
-def _working_content_snapshot(root: Path, paths: Sequence[str]) -> dict[str, Any]:
-    actual_untracked = snapshot_digest._nul_paths(  # type: ignore[attr-defined]
-        snapshot_digest._run(root, ["ls-files", "--others", "--exclude-standard", "-z", "--", *paths]),  # type: ignore[attr-defined]
-        label="actual untracked path",
-    )
-    return snapshot_digest.compute_snapshot(root, kind="working_tree_content", base_ref="HEAD", scope_paths=list(paths), untracked_paths=actual_untracked)
+def _actual_untracked_paths(root: Path, paths: Sequence[str]) -> list[str]:
+    try:
+        raw = snapshot_digest.run_git(root, ["ls-files", "--others", "--exclude-standard", "-z", "--", *paths])
+        return snapshot_digest.nul_paths(raw, label="actual untracked path")
+    except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
+        raise GitGuardError("actual untracked pathを安全に確認できません。", code="postcondition_failed") from exc
+
+
+def _path_fingerprint(root: Path, rel: str) -> tuple[object, ...]:
+    """Safely fingerprint one exact regular worktree path without exposing data."""
+
+    current = root
+    parts = PurePosixPath(rel).parts
+    for index, part in enumerate(parts):
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            return ("missing",)
+        except OSError as exc:
+            raise GitGuardError("exact pathを安全にfingerprintできません。", code="unsafe_path") from exc
+        if stat.S_ISLNK(metadata.st_mode):
+            raise GitGuardError(f"scope pathにsymlink componentがあります: {rel}", code="unsafe_path")
+        if index < len(parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+            raise GitGuardError(f"scope pathのancestorはdirectoryにしてください: {rel}", code="unsafe_path")
+        if index == len(parts) - 1:
+            if not stat.S_ISREG(metadata.st_mode):
+                raise GitGuardError(f"exact pathは通常fileにしてください: {rel}", code="scope_mismatch")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                descriptor = os.open(current, flags)
+            except OSError as exc:
+                raise GitGuardError("exact pathを安全に開けません。", code="unsafe_path") from exc
+            try:
+                with os.fdopen(descriptor, "rb") as stream:
+                    opened = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(opened.st_mode):
+                        raise GitGuardError(f"exact pathは通常fileにしてください: {rel}", code="scope_mismatch")
+                    hasher = hashlib.sha256()
+                    size = 0
+                    while True:
+                        chunk = stream.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        hasher.update(chunk)
+                    closed = os.fstat(stream.fileno())
+            except GitGuardError:
+                raise
+            except OSError as exc:
+                raise GitGuardError("exact pathを安全に読み取れません。", code="unsafe_path") from exc
+            if (
+                opened.st_ino != closed.st_ino
+                or opened.st_dev != closed.st_dev
+                or opened.st_size != closed.st_size
+                or opened.st_mtime_ns != closed.st_mtime_ns
+                or opened.st_mode != closed.st_mode
+            ):
+                raise GitGuardError("exact pathがfingerprint中に変化しました。", code="precondition_failed")
+            return ("file", stat.S_IMODE(opened.st_mode), size, hasher.hexdigest())
+    return ("missing",)
+
+
+def _worktree_fingerprints(root: Path, paths: Sequence[str]) -> dict[str, tuple[object, ...]]:
+    return {path: _path_fingerprint(root, path) for path in paths}
 
 
 def _run_unstage(root: Path, paths: Sequence[str]) -> dict[str, Any]:
     _assert_branch_clean_state(root, require_branch=True)
-    before_paths = _ensure_no_unrelated_staged(root, paths)
-    before_content = _working_content_snapshot(root, paths)
+    before_paths = _staged_paths(root)
+    before_index = _staged_index_fingerprint(root, before_paths, paths)
+    before_content = _worktree_fingerprints(root, paths)
     for path in paths:
         _ensure_no_symlink_path(root, path, reject_directory=True)
     _git(root, ["restore", "--staged", "--", *paths])
-    after_paths = _ensure_no_unrelated_staged(root, paths)
-    after_content = _working_content_snapshot(root, paths)
+    after_paths = _staged_paths(root)
+    _ensure_outside_staged_unchanged(root, before_paths, after_paths, paths, before_index)
+    after_content = _worktree_fingerprints(root, paths)
     if before_content != after_content:
         raise GitGuardError("unstageがworktree contentを変更しました。", code="postcondition_failed")
     if any(path in after_paths for path in paths):
@@ -500,10 +622,28 @@ def _run_commit(root: Path, contract: Mapping[str, Any], paths: Sequence[str], s
     for path in staged:
         _ensure_no_symlink_path(root, path)
     message = _commit_message(contract, scope)
+    try:
+        identity_name, identity_email = snapshot_digest.resolve_git_identity(root)
+    except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
+        raise GitGuardError("Git commit identityを安全に解決できません。", code="precondition_failed") from exc
     before_head = _git_text(root, ["rev-parse", "HEAD"])
-    # Explicitly disable hooks/signing and pass only argv, so repository
-    # configuration cannot execute an external helper during this write.
-    _git(root, ["commit", "--no-verify", "--no-gpg-sign", "-m", message])
+    # Explicitly disable hooks/signing and pass the resolved identity as
+    # literal config values, so the sanitized Git environment can still honor
+    # an intended local/global/system identity without executing helpers.
+    _git(
+        root,
+        [
+            "-c",
+            f"user.name={identity_name}",
+            "-c",
+            f"user.email={identity_email}",
+            "commit",
+            "--no-verify",
+            "--no-gpg-sign",
+            "-m",
+            message,
+        ],
+    )
     after_head = _git_text(root, ["rev-parse", "HEAD"])
     if after_head == before_head:
         raise GitGuardError("commit後のHEADが変化していません。", code="postcondition_failed")
@@ -526,7 +666,7 @@ def apply(
     contract_map, root, selected, subject_snapshot, paths = _validate_contract(contract, operation)
     scope = _scope(contract_map)
     pre_snapshot = _preflight_snapshot(root, subject_snapshot)
-    if selected in {"stage_exact_paths_or_hunks", "unstage_index_only_exact_paths", "commit_non_amend"}:
+    if selected == "commit_non_amend":
         _ensure_no_unrelated_staged(root, paths)
     if selected == "branch_create_and_switch_new":
         evidence = _run_branch_create(root, contract_map, scope)
@@ -544,8 +684,8 @@ def apply(
     expected_post = _extract(contract_map, "postwrite_snapshot", "postconditions")
     if expected_post is not None:
         try:
-            expected_shape = boundary_guard._snapshot_shape(expected_post, "postwrite_snapshot")  # type: ignore[attr-defined]
-        except boundary_guard.BoundaryError as exc:
+            expected_shape = snapshot_digest.snapshot_shape(expected_post, "postwrite_snapshot")
+        except snapshot_digest.SnapshotError as exc:
             raise GitGuardError(str(exc), code="postcondition_failed") from exc
         if post_snapshot != expected_shape:
             raise GitGuardError("actual postwrite snapshotがcontract postwrite_snapshotと一致しません。", code="postcondition_failed")

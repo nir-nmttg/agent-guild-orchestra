@@ -3,19 +3,13 @@
   "strategies": {
     "astra_only": {
       "root": {"model": "gpt-6-astra", "reasoning_effort": "high"},
-      "implementation": "root",
-      "risk_review": {"model": "gpt-6-astra", "reasoning_effort": "high"}
+      "implementation": {"mode": "root"},
+      "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "high"}
     },
     "astra_luna": {
       "root": {"model": "gpt-6-astra", "reasoning_effort": "high"},
-      "implementation": {"model": "gpt-5.6-luna", "reasoning_effort": "max"},
-      "risk_review": {"model": "gpt-6-astra", "reasoning_effort": "high"}
-    },
-    "v2_4_baseline": {
-      "frozen_release": "2.4.0",
-      "root": {"model": "gpt-5.6-sol", "reasoning_effort": "high"},
-      "implementation": "frozen v2.4 routing",
-      "risk_review": "frozen v2.4 review routing"
+      "implementation": {"mode": "adaptive", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
+      "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "high"}
     }
   },
   "tasks": [
@@ -23,24 +17,36 @@
       "id": "pilot-installer-conflict",
       "split": "pilot",
       "objective": "Diagnose and fix a managed-file update conflict without losing user edits.",
+      "features": ["installer", "conflict", "preservation"],
+      "risk": "high",
+      "review_required": true,
       "acceptance": ["conflict reproduced", "user edit preserved", "targeted checks pass"]
     },
     {
       "id": "pilot-boundary-negative",
       "split": "pilot",
       "objective": "Add a negative test for a repository-boundary escape.",
+      "features": ["validation", "path-boundary", "negative-test"],
+      "risk": "low",
+      "review_required": false,
       "acceptance": ["escape rejected", "valid root accepted", "test passes"]
     },
     {
       "id": "holdout-cross-file-change",
       "split": "holdout",
       "objective": "Implement a bounded change spanning code, documentation, and validation.",
+      "features": ["cross-file", "documentation", "validation"],
+      "risk": "medium",
+      "review_required": false,
       "acceptance": ["behavior works", "docs match", "relevant validation passes"]
     },
     {
       "id": "holdout-security-review",
       "split": "holdout",
       "objective": "Review a Git helper change for scope and snapshot bypasses.",
+      "features": ["security", "Git", "snapshot"],
+      "risk": "high",
+      "review_required": true,
       "acceptance": ["material risks identified", "claims cite evidence", "disposition is actionable"]
     }
   ]

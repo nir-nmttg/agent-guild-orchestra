@@ -1,35 +1,39 @@
 # モデル選択評価
 
-3.0.0の配布設定はRootがAstra / high、AdventurerがLuna / max、read-only InquisitorがAstra / highです。これは設計上の選択であり、このrelease作業で30 taskのlive比較や費用削減の実証は行っていません。
+この評価は、Astra-onlyとadaptive Astra+Luna maxの実際のtask結果を、同じtask rubricとverificationで記録するための小さなpilot/holdout手順です。配布設定はAstra Root / high、Luna Adventurer / max、独立Astra / high reviewerです。v2.4 armや固定 worker/review topologyは現行比較の必須条件ではありません。
 
-## 比較する三構成
+## 比較する二つのarm
 
-scripts/model_selection_eval.yamlは次を比較します。
+`scripts/model_selection_eval.yaml`のstrategyは次の二つだけです。
 
-1. astra_only: Astra Rootが実装し、同じAstra/high risk reviewを受ける
-2. astra_luna: Astra RootとLuna/max Adventurerで実装し、同じAstra/high risk reviewを受ける
-3. v2_4_baseline: tagまたはcommitで固定した2.4.0配布物を使い、当時の実装routingとreview policyをそのまま実行する
+1. `astra_only`: Astra/highのRootがtaskを直接実装します。workerは記録しません。risk taskだけ独立Astra/high reviewを付けます。
+2. `astra_luna`: Astra/highのRootが必要と判断した時だけLuna/max workerへ委譲します。worker数はtaskごとに可変で、同じtaskで独立workerを複数記録できます。risk taskのreviewは独立Astra/highです。
 
-最初の二構成は同じAstra/high reviewを使い、implementation strategyの差を比較します。baselineは現在のworking treeから再現した「旧風prompt」ではなく、2.4.0 releaseを別checkoutで実行します。baselineとの比較はreview policyを含むsystem全体の差であり、implementation modelだけの差とは解釈しません。
+各taskの`features`、`risk`、`review_required`はmanifestで先に固定します。実際にworkerやreviewを呼んだか、retryしたか、stageの順序はrecordへそのまま残し、構成から固定しません。Rootのuser model/effort overrideは`provenance.root_override`とRoot stageのeffective `model` / `reasoning_effort`へ記録します。Luna workerと独立reviewのmodel/effortは固定します。
 
-## pilotとholdout
+## Pilotとholdout
 
-まずmanifestのpilotだけを各構成で実行し、task記述、acceptance rubric、usage captureが機能するか確認します。pilot結果を見て構成を選びません。手順を固定した後、未使用のholdoutを各構成へ同じ順序または事前に決めた順序で割り当てます。
+まずpilotを各armで実行して、task description、acceptance rubric、fresh session、permission/model observation、usage captureが機能するか確認します。pilot結果でarmを選ばず、手順を固定してから未使用のholdoutを同じ条件へ割り当てます。各taskはclean checkoutとfresh sessionで開始します。
 
-各taskは独立したclean checkoutとsessionで始めます。live recordの`provenance`にはunique run ID、full target revision、Codex versionを記録します。`task_input`はmanifest objectiveと一致させ、`acceptance_evidence`はmanifestの全criterionを同じ順序で、pass/failと根拠を付けて記録します。modelの実行結果は人間またはblind reviewerが同じacceptance rubricで判定し、recordの`accepted`は全criterionの結果と一致させます。
+`observed_model_run`にはunique `run_id`、session reference、full target revision、Codex version、config/prompt/Skill bundle digest、fresh-context flag、実際のmodel permission evidenceを記録します。設定parseだけではeffective model、reroute、permission、fresh contextの証拠になりません。`manual_record`は手入力の記録、`synthetic_fixture`はschema/accounting用の合成記録として、observed runと明確に分けます。
 
-## whole-task accounting
+同じacceptance rubricを実行者と別の外部graderまたはblind reviewerが判定します。`grade_refs`は再現可能なtest、diff、grade artifactを指し、`acceptance_evidence`はmanifest criterionと同じ順序で記録します。`accepted`は全criterionの結果と一致させます。合成fixtureの文字列は実model品質を示しません。
 
-JSONLの一行が一つのtask / strategy結果です。`attempts`は1から連番のlistで、各attemptにoutcomeと実行されたstageを保存します。再試行前のattemptはfailed stageを含み、最終attemptのoutcomeはrecord全体の`accepted`と一致します。各stageはroot / worker / reviewのrole、実際のmodel、effort、完了状態、token、costを持ちます。Astra-onlyにworker stageを混ぜず、Astra+Lunaでは各attemptのLuna/max worker使用を記録し、両v3構成の最終attemptはAstra/high reviewを含めます。v2.4 baselineも実際に使ったmodel / effortをstageごとに記録します。accepted=falseのtaskも分母から外しません。
+## Recordとwhole-task accounting
 
-tokenとcost_usdは全attemptの全stageについて実runが報告した値を優先します。不明値はnullであり、0ではありません。一つでもstage usageが不明ならgroup totalもnullになります。tokenから費用を推定する場合はcached input、uncached input、output、reasoning、long-context、fast pricingを実行時の公式価格で区別する必要があります。このharnessはdefault価格表から費用を推測しません。
+JSONL一行が一つのtask/strategy結果です。既存の`task_id`、`strategy`、`split`、`accepted`、`task_input`、`acceptance_evidence`、`provenance`を保持し、`grade_refs`を追加します。`attempts`は1から連番で、各attemptは`accepted`、wall timeとsource、実行した`stages`を持ちます。再試行前のattemptはfailed stageと`failure_evidence`を含み、最終attemptの結果はrecordの`accepted`と一致させます。
+
+各stageは`sequence`、unique `invocation_id`、`role`（root/worker/review）、effective model/effort、status、failure evidence、usage、elapsed time、reproducible `evidence_refs`を持ちます。sequenceは記録された実行順を表します。Astra-onlyのworkerは拒否されますが、Astra+Lunaのworker数は0以上です。taskの`review_required`がtrueなら最終attemptへreviewを含めます。parallelismやretryの数をこのvalidatorが知らないため、実際の全invocationを記録する責任はrunner/Rootに残ります。
+
+`usage`はtokens、hostから得た`codex_usage`、`api_cost_usd`、各sourceを分けます。欠測はnullとし、欠測を0へ変換しません。observed Codex usageとAPI USD estimate/account-reported costは別集計で、API価格表、price DB、推定runnerは持ちません。必要なusageが一つでも不明なら該当totalはunknownで、単純なcost差からsavingsを主張しません。wall timeもstage合計ではなくattempt単位で記録します。
+sourceはevidence kindと一致させます。`synthetic_fixture`は`synthetic`/`unknown`、`manual_record`は`manual`/`unknown`、`observed_model_run`はusageとwallが`observed`/`unknown`、costが`account_reported`/`api_estimate`/`unknown`です。これにより、合成値がobserved usageやaccount-reported costとして集計されません。
 
 ~~~bash
 python3 scripts/model_selection_eval.py --plan
-python3 scripts/model_selection_eval.py --validate-results /path/to/live-results.jsonl
-python3 scripts/model_selection_eval.py --summarize /path/to/live-results.jsonl
+python3 scripts/model_selection_eval.py --validate-results /path/to/results.jsonl
+python3 scripts/model_selection_eval.py --summarize /path/to/results.jsonl
 ~~~
 
-summaryはassigned task、accepted task、attempt、completeな場合のtoken / cost totalを出します。統計的な優越、非劣性、費用削減を自動で主張しません。accepted coverageが異なる構成の単純な費用差は、節約の根拠として扱いません。
+summaryはtask分母を保ったaccepted count、attempt/stage/review/worker count、source付きtoken、Codex usage、API cost、wall-timeを出します。統計的優越、非劣性、費用削減を自動で主張しません。pilot/holdoutの比較には、同じverification、外部grade、実際のpermission/model/fresh-context event、全retry/failure、適切なhost usage evidenceが必要です。
 
-scripts/validation/fixtures/model_eval_offline.jsonlはparser、provenance shape、model / role区別、unknown usage、failed / retry accounting、acceptance evidence、accepted-task denominatorを確認するfixtureです。offline fixtureのtarget revisionとCodex versionはnullで、live runを装いません。evidence_kind=offline_fixtureであり、実model品質や費用の証拠ではありません。
+`scripts/validation/fixtures/model_eval_offline.jsonl`はsyntheticと明記したpilot fixtureです。direct/no-review、adaptive no-worker、material review、複数worker、retry、wrong role/model/order、duplicate invocation、missing failure evidence、root override、observed provenanceのvalidator経路を確認します。これは実benchmarkではなく、品質、host quota、API費用、savingsの証拠ではありません。

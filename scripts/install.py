@@ -14,10 +14,12 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from typing import Iterable
 
 
@@ -29,6 +31,7 @@ AGENTS_END = "<!-- agent-guild-orchestra:end -->"
 EXCLUDE_START = "# agent-guild-orchestra:start"
 EXCLUDE_END = "# agent-guild-orchestra:end"
 MANIFEST_REL = Path(".agents/orchestra/install-manifest.json")
+CONFIG_REL = Path(".codex/config.toml")
 ARCHIVE_ROOT_REL = Path(".agent-guild-orchestra-archives")
 EXCLUDE_REL = Path(".git/info/exclude")
 ARCHIVE_EXCLUDE_BLOCK = (
@@ -37,6 +40,9 @@ ARCHIVE_EXCLUDE_BLOCK = (
     f"{EXCLUDE_END}"
 )
 MANIFEST_SCHEMA = 1
+CONFIG_MODES = {"managed", "user-owned"}
+MANAGED_KINDS = {"file", "agents_block", "exclude_block"}
+SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 LEGACY_AGENT_NAMES = {
     "adventurer", "artificer", "captain", "cartographer", "courier",
@@ -77,6 +83,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-non-default-source", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true", help="変更予定をJSONで表示し、書き込みません")
     parser.add_argument("--major-upgrade", action="store_true", help="v2導入物をcold archiveしてv3へ更新します")
+    parser.add_argument(
+        "--config-mode", choices=sorted(CONFIG_MODES), default=None,
+        help=".codex/config.tomlをmanagedまたはuser-ownedとして扱います（省略時は既存設定を継承）",
+    )
     parser.add_argument(
         "--legacy-root",
         help="v2がGit repository外の旧Guild rootにある場合、そのabsolute pathを明示します",
@@ -253,9 +263,67 @@ def load_manifest(target: Path) -> dict[str, object] | None:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise InstallError(f"cannot read installed manifest: {exc}") from exc
-    if not isinstance(value, dict) or value.get("schema") != MANIFEST_SCHEMA or not isinstance(value.get("files"), dict):
+    if not isinstance(value, dict):
         raise InstallError("installed manifest is unsupported; review it before changing the installation")
+    validate_manifest(value)
     return value
+
+
+def validate_manifest(value: dict[str, object]) -> None:
+    """Validate every manifest field that affects an installation decision."""
+    if type(value.get("schema")) is not int or value.get("schema") != MANIFEST_SCHEMA:
+        raise InstallError("installed manifest has unsupported schema")
+
+    selected = value.get("selected_skills")
+    if not isinstance(selected, list) or any(not isinstance(item, str) for item in selected):
+        raise InstallError("installed manifest selected_skills must be a list of strings")
+    if len(selected) != len(set(selected)):
+        raise InstallError("installed manifest selected_skills must not contain duplicates")
+
+    files = value.get("files")
+    if not isinstance(files, dict):
+        raise InstallError("installed manifest files must be an object")
+    for rel_text, record in files.items():
+        if not isinstance(rel_text, str):
+            raise InstallError("installed manifest file keys must be strings")
+        try:
+            rel = safe_rel(rel_text)
+        except InstallError as exc:
+            raise InstallError(f"installed manifest has unsafe file key: {rel_text}") from exc
+        if not is_managed_destination(rel):
+            raise InstallError(f"installed manifest has unsupported file key: {rel}")
+        if not isinstance(record, dict):
+            raise InstallError(f"installed manifest record is invalid: {rel}")
+        kind = record.get("kind")
+        if not isinstance(kind, str) or kind not in MANAGED_KINDS or kind != managed_kind(rel):
+            raise InstallError(f"installed manifest has unknown file kind for {rel}")
+        digest = record.get("sha256")
+        if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+            raise InstallError(f"installed manifest has invalid sha256 for {rel}")
+
+    ownership = value.get("ownership")
+    if ownership is not None:
+        if not isinstance(ownership, dict) or set(ownership) != {CONFIG_REL.as_posix()}:
+            raise InstallError("installed manifest ownership must name only .codex/config.toml")
+        mode = ownership.get(CONFIG_REL.as_posix())
+        if not isinstance(mode, str) or mode not in CONFIG_MODES:
+            raise InstallError("installed manifest config ownership must be managed or user-owned")
+        if mode == "user-owned" and CONFIG_REL.as_posix() in files:
+            raise InstallError("user-owned config may not appear in the managed files map")
+
+
+def manifest_config_mode(manifest: dict[str, object] | None) -> str:
+    if manifest is None:
+        return "managed"
+    ownership = manifest.get("ownership")
+    if ownership is None:
+        # Manifests written before config ownership was introduced managed the
+        # distributed config whenever it appeared in the files map.
+        return "managed"
+    assert isinstance(ownership, dict)
+    mode = ownership[CONFIG_REL.as_posix()]
+    assert isinstance(mode, str)
+    return mode
 
 
 def v2_evidence(target: Path) -> bool:
@@ -336,20 +404,32 @@ def managed_kind(rel: Path) -> str:
     return "file"
 
 
-def build_candidate(source: Path, selected: set[str], catalog: dict[str, tuple[str, Path]]) -> dict[Path, bytes]:
+def is_managed_destination(rel: Path) -> bool:
+    """Return whether a relative path belongs to the installer surface."""
+    if rel in {Path("AGENTS.md"), EXCLUDE_REL, CONFIG_REL, Path(".agents/orchestra/README.md")}:
+        return True
+    if len(rel.parts) == 3 and rel.parts[:2] == (".codex", "agents"):
+        return rel.suffix == ".toml"
+    if len(rel.parts) == 4 and rel.parts[:3] == (".agents", "orchestra", "scripts"):
+        return rel.suffix == ".py"
+    return len(rel.parts) >= 4 and rel.parts[:2] == (".agents", "skills")
+
+
+def build_candidate(
+    source: Path,
+    selected: set[str],
+    catalog: dict[str, tuple[str, Path]],
+    *,
+    config_mode: str = "managed",
+) -> dict[Path, bytes]:
     candidate: dict[Path, bytes] = {}
     for rel, path in iter_files(source):
         rel = safe_rel(rel)
         if rel == Path("AGENTS.md"):
             continue
-        allowed = (
-            rel == Path(".codex/config.toml")
-            or (len(rel.parts) == 3 and rel.parts[:2] == (".codex", "agents") and rel.suffix == ".toml")
-            or rel == Path(".agents/orchestra/README.md")
-            or (len(rel.parts) == 4 and rel.parts[:3] == (".agents", "orchestra", "scripts") and rel.suffix == ".py")
-            or (len(rel.parts) >= 4 and rel.parts[:2] == (".agents", "skills"))
-        )
-        if not allowed:
+        if rel == CONFIG_REL and config_mode == "user-owned":
+            continue
+        if not is_managed_destination(rel):
             raise InstallError(f"unexpected template distribution path: {rel}")
         if rel in candidate:
             raise InstallError(f"duplicate source destination: {rel}")
@@ -517,6 +597,110 @@ def deactivate_legacy(root: Path, rels: list[Path], *, replacing_in_same_target:
             remove_existing(destination)
 
 
+def distribution_config_snippet(source: Path) -> str:
+    config_path = source / CONFIG_REL
+    if not config_path.is_file() or config_path.is_symlink():
+        raise InstallError("template .codex/config.toml is required for the user-owned guidance")
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise InstallError(f"cannot read template .codex/config.toml: {exc}") from exc
+    try:
+        parsed = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        # User-owned mode never consumes the source config as an install
+        # artifact. Keep guidance useful even for a caller-provided source
+        # whose config cannot be parsed as TOML.
+        return text.strip()
+
+    # Keep user-owned guidance focused on the settings that determine this
+    # distribution's orchestration behavior, while taking their values from
+    # the actual source config instead of duplicating defaults here.
+    root_keys = ("model", "model_reasoning_effort")
+    agents = parsed.get("agents")
+    features = parsed.get("features")
+    if (
+        all(key in parsed for key in root_keys)
+        and isinstance(agents, dict)
+        and all(key in agents for key in ("enabled", "max_concurrent_threads_per_session"))
+        and isinstance(features, dict)
+        and "multi_agent" in features
+    ):
+        required_values = [parsed[key] for key in root_keys] + [
+            agents[key] for key in ("enabled", "max_concurrent_threads_per_session")
+        ] + [features["multi_agent"]]
+        if not (
+            isinstance(required_values[0], str)
+            and isinstance(required_values[1], str)
+            and isinstance(required_values[2], bool)
+            and isinstance(required_values[3], int)
+            and not isinstance(required_values[3], bool)
+            and isinstance(required_values[4], bool)
+        ):
+            return text.strip()
+
+        def toml_literal(value: object) -> str:
+            if isinstance(value, str):
+                return json.dumps(value, ensure_ascii=False)
+            if value is True:
+                return "true"
+            if value is False:
+                return "false"
+            if isinstance(value, int) and not isinstance(value, bool):
+                return str(value)
+            raise InstallError("template .codex/config.toml required settings have unsupported values")
+
+        return "\n".join(
+            [
+                *(f"{key} = {toml_literal(parsed[key])}" for key in root_keys),
+                "",
+                "[agents]",
+                *(f"{key} = {toml_literal(agents[key])}" for key in ("enabled", "max_concurrent_threads_per_session")),
+                "",
+                "[features]",
+                f"multi_agent = {toml_literal(features['multi_agent'])}",
+            ]
+        )
+    return text.strip()
+
+
+def build_next_steps(
+    target: Path,
+    config_mode: str,
+    *,
+    external_legacy_root: Path | None,
+    config_snippet: str | None = None,
+) -> list[str]:
+    steps = [
+        "Installation places the distribution but does not activate it.",
+        f"Trust the target repository in Codex: {target}.",
+        f"Start a new Codex task from the target root: {target}.",
+        "Verify the effective configuration uses gpt-6-astra with high reasoning and that the named agents adventurer and inquisitor are available.",
+    ]
+    if config_mode == "user-owned":
+        steps.append(
+            "Because .codex/config.toml is user-owned and was left untouched, ensure it contains these required logical settings:\n"
+            f"{config_snippet or '(distribution config unavailable)'}"
+        )
+    if external_legacy_root is not None:
+        steps.extend(
+            [
+                "Install normally into every dependent child repository first, then inspect each child manifest and preserve its unmanaged content.",
+                "After all dependent children are installed, run this explicit --legacy-root major upgrade once from an already-installed child.",
+                "Removing the old parent-managed surface affects every dependent sibling repository under that parent; this installer does not recursively discover children or provide an atomic multi-repository migration.",
+            ]
+        )
+    return steps
+
+
+def build_warnings(*, external_legacy_root: Path | None) -> list[str]:
+    if external_legacy_root is None:
+        return []
+    return [
+        "The explicit legacy-root cleanup removes the old parent-managed surface for all dependent sibling repositories under that parent.",
+    ]
+
+
 def plan_install(
     args: argparse.Namespace,
 ) -> tuple[Path, Path | None, dict[str, object], dict[Path, bytes], list[dict[str, str]], list[Path], dict[str, object]]:
@@ -530,8 +714,12 @@ def plan_install(
     catalog = package_catalog(source)
     manifest = load_manifest(target)
     previous_selected = set(manifest.get("selected_skills", [])) if manifest else set()
+    previous_config_mode = manifest_config_mode(manifest)
+    config_mode = args.config_mode or previous_config_mode
+    if config_mode not in CONFIG_MODES:
+        raise InstallError("config mode must be managed or user-owned")
     selected = (previous_selected | set(args.with_skill)) - set(args.without_skill)
-    candidate = build_candidate(source, selected, catalog)
+    candidate = build_candidate(source, selected, catalog, config_mode=config_mode)
     target_legacy = manifest is None and v2_evidence(target)
     if target_legacy and external_legacy_root is not None:
         raise InstallError("v2 evidence exists in both target and --legacy-root; migrate one explicit root at a time")
@@ -554,6 +742,10 @@ def plan_install(
         raise InstallError("installed manifest files map is invalid")
     actions: list[dict[str, str]] = []
     legacy_rels = legacy_paths(migration_root) if migration_root is not None else []
+    if migration_root == target and config_mode == "user-owned":
+        # A caller explicitly taking ownership of the config during an
+        # in-place v2 migration must keep those bytes out of legacy cleanup.
+        legacy_rels = [rel for rel in legacy_rels if rel != CONFIG_REL]
     if external_legacy_root is not None:
         for rel in [*legacy_rels, ARCHIVE_ROOT_REL]:
             managed_root = validate_destination(external_legacy_root, rel)
@@ -578,10 +770,13 @@ def plan_install(
             previous_hash = previous.get("sha256")
             previous_kind = previous.get("kind")
             actual_hash = current_hash(target, rel, str(previous_kind))
-            if actual_hash != previous_hash and desired_hash != previous_hash:
-                raise InstallError(f"managed file changed locally and in distribution: {rel}")
             if actual_hash == desired_hash:
+                # A manual edit may have brought the destination exactly to
+                # the new distribution. Adopt that converged state before
+                # checking whether both sides diverged from the old baseline.
                 action = "keep"
+            elif actual_hash != previous_hash and desired_hash != previous_hash:
+                raise InstallError(f"managed file changed locally and in distribution: {rel}")
             elif actual_hash != previous_hash and desired_hash == previous_hash:
                 action = "preserve-local"
             else:
@@ -600,6 +795,10 @@ def plan_install(
     candidate_paths = set(candidate)
     for rel_text, old in previous_files.items():
         rel = safe_rel(rel_text)
+        if rel == CONFIG_REL and config_mode == "user-owned":
+            # Switching ownership removes the config from the manifest while
+            # deliberately leaving the user's bytes and mode untouched.
+            continue
         if rel in candidate_paths or not isinstance(old, dict):
             continue
         actual_hash = current_hash(target, rel, str(old.get("kind")))
@@ -614,6 +813,7 @@ def plan_install(
             else dt.datetime.now(dt.timezone.utc).isoformat()
         ),
         "selected_skills": sorted(selected),
+        "ownership": {CONFIG_REL.as_posix(): config_mode},
         "files": {},
     }
     actions_by_path = {Path(item["path"]): item["action"] for item in actions}
@@ -653,10 +853,20 @@ def execute(args: argparse.Namespace) -> int:
     if not args.target:
         raise InstallError("--target is required unless --list-skills is used")
     target, migration_root, result_manifest, candidate, actions, legacy_rels, previous_files = plan_install(args)
+    config_mode = manifest_config_mode(result_manifest)
+    config_snippet = distribution_config_snippet(source) if config_mode == "user-owned" else None
     plan = {
         "target": str(target), "version": VERSION, "dry_run": args.dry_run,
         "major_upgrade": bool(legacy_rels), "archive_paths": [p.as_posix() for p in legacy_rels],
         "legacy_root": str(migration_root) if migration_root is not None else None,
+        "config_mode": config_mode,
+        "warnings": build_warnings(external_legacy_root=Path(args.legacy_root).expanduser().resolve() if args.legacy_root else None),
+        "next_steps": build_next_steps(
+            target,
+            config_mode,
+            external_legacy_root=Path(args.legacy_root).expanduser().resolve() if args.legacy_root else None,
+            config_snippet=config_snippet,
+        ),
         "legacy_actions": [
             {
                 "action": (

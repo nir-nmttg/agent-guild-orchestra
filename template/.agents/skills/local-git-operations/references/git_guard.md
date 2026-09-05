@@ -12,11 +12,7 @@ snapshot_digest.py --repo <absolute-git-root> --kind revision_only|working_tree_
 
 `working_tree_content`には一つ以上の`--scope`が必要で、そのscope内の実untracked pathをすべて`--untracked`へ列挙します。`commit_range`には`--base-ref`と`--head-ref`が必要です。返ったcanonical mapping全体をevidenceとして保持し、`snapshot_id`や`diff_hash`だけを作成・置換しません。
 
-stateless boundary artifactの確認は、JSON fileを渡して次の形で行います。`--no-recompute`はfixtureや既に別経路でrecompute済みの内部確認に限り、通常のhandoffでは省略します。
-
-```text
-boundary_guard.py validate --kind task_contract|assignment|result|review_receipt|checkpoint --input <json-file>
-```
+通常のhandoff、result、review、checkpointはCodex native task historyへ短く記録します。runtimeにはassignment/result/review artifactを検証する常駐schema validatorはありません。`git_guard`へ渡すassignment JSONは、明示されたGit operationのcontractとしてだけ扱います。
 
 Git writeは、closed allowlistのoperationを一つだけ選び、assignment JSON fileを渡します。stageでpatchを使う場合だけ`--patch-file`または`--patch`を追加します。
 
@@ -40,6 +36,8 @@ Current closed allowlistは`branch_create_and_switch_new`、`rename_origin_unpus
 許可するlocal操作は、今回明示されたものに限ります。通常の閉じた集合はnew branch create/switch、origin未push確認済みbranch rename、exact path/hunkのstage、indexだけのexact-path unstage、non-amend commitです。既存branchへの一般switchや、変更を破棄する操作は含めません。
 
 `git_guard`、sandbox、approval、ユーザー指示が別々に示す権限を足し合わせてscopeを広げません。helperが拒否したら、別コマンドや別pathへ迂回せず停止します。
+
+`working_tree_content` snapshotはcallerが選んだworktree contentとscopeを結び付けます。renameのnew endpointだけをscopeにしたsnapshotもあり得ます。`git_guard`は`--no-renames`でstaged renameを両endpointへ展開し、commit scope内かを確認しますが、indexのstaged hunk compositionは証明しません。commit前に意図したstaged diffをread-onlyで確認し、この限界をresultへ報告します。
 
 ## postflight
 

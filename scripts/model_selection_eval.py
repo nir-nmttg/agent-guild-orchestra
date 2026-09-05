@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Validate and summarize real Agent Guild Orchestra benchmark records.
+"""Validate and summarize adaptive Agent Guild Orchestra evaluation records.
 
-This tool never simulates model behavior. Offline fixtures exercise only the
-recording and accounting code and are always labelled as such.
+This tool validates the shape and accounting of records supplied by a real
+pilot or holdout run. Synthetic fixtures and manually entered records remain
+separate from observed runs; the tool never simulates a model, collects Codex
+usage, or turns token counts into a price claim.
 """
 
 from __future__ import annotations
@@ -19,10 +21,33 @@ from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "scripts/model_selection_eval.yaml"
-STRATEGIES = {"astra_only", "astra_luna", "v2_4_baseline"}
+STRATEGIES = {"astra_only", "astra_luna"}
 SPLITS = {"pilot", "holdout"}
 ROLES = {"root", "worker", "review"}
 STAGE_STATUSES = {"completed", "failed"}
+EVIDENCE_KINDS = {"synthetic_fixture", "manual_record", "observed_model_run"}
+MEASUREMENT_SOURCES = {"observed", "manual", "synthetic", "unknown"}
+COST_SOURCES = {"account_reported", "api_estimate", "manual", "synthetic", "unknown"}
+RISKS = {"low", "medium", "high"}
+SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+GIT_OBJECT_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+SOURCE_POLICIES = {
+    "synthetic_fixture": {
+        "usage": {"synthetic", "unknown"},
+        "wall": {"synthetic", "unknown"},
+        "cost": {"synthetic", "unknown"},
+    },
+    "manual_record": {
+        "usage": {"manual", "unknown"},
+        "wall": {"manual", "unknown"},
+        "cost": {"manual", "unknown"},
+    },
+    "observed_model_run": {
+        "usage": {"observed", "unknown"},
+        "wall": {"observed", "unknown"},
+        "cost": {"account_reported", "api_estimate", "unknown"},
+    },
+}
 
 
 class EvalError(RuntimeError):
@@ -39,33 +64,77 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def nonempty_string(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip() or "\0" in value:
+        raise EvalError(f"{label} must be a non-empty string")
+    return value
+
+
+def optional_number(value: object, label: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise EvalError(f"{label} must be a number or null")
+    result = float(value)
+    if result < 0 or not math.isfinite(result):
+        raise EvalError(f"{label} must be finite and non-negative")
+    return result
+
+
+def optional_integer(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise EvalError(f"{label} must be a non-negative integer or null")
+    return value
+
+
+def validate_model_pair(value: object, label: str) -> None:
+    if not isinstance(value, dict) or set(value) != {"model", "reasoning_effort"}:
+        raise EvalError(f"{label} must contain model and reasoning_effort")
+    nonempty_string(value["model"], f"{label}.model")
+    nonempty_string(value["reasoning_effort"], f"{label}.reasoning_effort")
+
+
 def validate_manifest(value: dict[str, Any]) -> None:
     if value.get("schema") != "agent-guild-model-benchmark-v3":
         raise EvalError("unsupported benchmark manifest schema")
     strategies = value.get("strategies")
     if not isinstance(strategies, dict) or set(strategies) != STRATEGIES:
         raise EvalError(f"strategies must be exactly {sorted(STRATEGIES)}")
-    astra_only = strategies["astra_only"]
-    astra_luna = strategies["astra_luna"]
-    baseline = strategies["v2_4_baseline"]
     for label, strategy in strategies.items():
         if not isinstance(strategy, dict):
             raise EvalError(f"strategy {label} must be an object")
-    for label in ("astra_only", "astra_luna"):
-        if strategies[label].get("risk_review") != {"model": "gpt-6-astra", "reasoning_effort": "high"}:
-            raise EvalError(f"strategy {label} must use the same Astra/high risk review")
-    if astra_only.get("root") != {"model": "gpt-6-astra", "reasoning_effort": "high"}:
+        validate_model_pair(strategy.get("root"), f"strategy {label}.root")
+        review = strategy.get("risk_review")
+        if not isinstance(review, dict) or set(review) != {"model", "reasoning_effort", "mode"}:
+            raise EvalError(f"strategy {label} risk_review must declare a model and mode")
+        validate_model_pair(
+            {key: review[key] for key in ("model", "reasoning_effort")},
+            f"strategy {label}.risk_review",
+        )
+        if review.get("mode") != "risk_based":
+            raise EvalError(f"strategy {label} risk_review must be risk_based")
+
+    astra_only = strategies["astra_only"]
+    if astra_only["root"] != {"model": "gpt-6-astra", "reasoning_effort": "high"}:
         raise EvalError("astra_only root must be Astra/high")
-    if astra_only.get("implementation") != "root":
-        raise EvalError("astra_only must keep implementation in the root session")
-    if astra_luna.get("root") != {"model": "gpt-6-astra", "reasoning_effort": "high"}:
+    if astra_only.get("implementation") != {"mode": "root"}:
+        raise EvalError("astra_only implementation must remain in the root session")
+    astra_luna = strategies["astra_luna"]
+    if astra_luna["root"] != {"model": "gpt-6-astra", "reasoning_effort": "high"}:
         raise EvalError("astra_luna root must be Astra/high")
-    if astra_luna.get("implementation") != {"model": "gpt-5.6-luna", "reasoning_effort": "max"}:
-        raise EvalError("astra_luna implementation must be Luna/max")
-    if baseline.get("frozen_release") != "2.4.0":
-        raise EvalError("baseline must identify the frozen v2.4 release")
-    if baseline.get("implementation") != "frozen v2.4 routing" or baseline.get("risk_review") != "frozen v2.4 review routing":
-        raise EvalError("baseline must execute the frozen v2.4 implementation and review policy")
+    if astra_luna.get("implementation") != {
+        "mode": "adaptive",
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "max",
+    }:
+        raise EvalError("astra_luna implementation must be adaptive Luna/max")
+    for label in STRATEGIES:
+        review = strategies[label]["risk_review"]
+        if review.get("model") != "gpt-6-astra" or review.get("reasoning_effort") != "high":
+            raise EvalError(f"strategy {label} must use an independent Astra/high risk review")
+
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise EvalError("tasks must be a non-empty list")
@@ -84,10 +153,18 @@ def validate_manifest(value: dict[str, Any]) -> None:
         splits.add(split)
         if not isinstance(task.get("objective"), str) or not task["objective"].strip():
             raise EvalError(f"task {task_id} needs an objective")
-        if not isinstance(task.get("acceptance"), list) or not task["acceptance"]:
+        acceptance = task.get("acceptance")
+        if not isinstance(acceptance, list) or not acceptance:
             raise EvalError(f"task {task_id} needs acceptance criteria")
-        if any(not isinstance(item, str) or not item.strip() for item in task["acceptance"]):
+        if any(not isinstance(item, str) or not item.strip() for item in acceptance):
             raise EvalError(f"task {task_id} acceptance criteria must be non-empty strings")
+        features = task.get("features")
+        if not isinstance(features, list) or not features or any(not isinstance(item, str) or not item.strip() for item in features):
+            raise EvalError(f"task {task_id} needs non-empty feature labels")
+        if task.get("risk") not in RISKS:
+            raise EvalError(f"task {task_id} has invalid risk")
+        if not isinstance(task.get("review_required"), bool):
+            raise EvalError(f"task {task_id} needs a boolean review_required")
     if splits != SPLITS:
         raise EvalError("manifest needs both pilot and holdout tasks")
 
@@ -109,38 +186,140 @@ def records(path: Path) -> Iterable[dict[str, Any]]:
         yield value
 
 
-def optional_number(value: object, label: str) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise EvalError(f"{label} must be a number or null")
-    result = float(value)
-    if result < 0 or not math.isfinite(result):
-        raise EvalError(f"{label} must be finite and non-negative")
-    return result
-
-
-def nonempty_string(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip() or "\0" in value:
-        raise EvalError(f"{label} must be a non-empty string")
-    return value
-
-
 def expected_model(manifest: dict[str, Any], strategy: str, role: str) -> dict[str, str] | None:
-    strategy_definition = manifest["strategies"][strategy]
-    if role == "root" and isinstance(strategy_definition.get("root"), dict):
-        return strategy_definition["root"]
-    if role == "worker" and isinstance(strategy_definition.get("implementation"), dict):
-        return strategy_definition["implementation"]
-    if role == "review" and isinstance(strategy_definition.get("risk_review"), dict):
-        return strategy_definition["risk_review"]
+    definition = manifest["strategies"][strategy]
+    if role == "root" and isinstance(definition.get("root"), dict):
+        return definition["root"]
+    if role == "worker" and isinstance(definition.get("implementation"), dict) and definition["implementation"].get("mode") == "adaptive":
+        return {
+            "model": definition["implementation"]["model"],
+            "reasoning_effort": definition["implementation"]["reasoning_effort"],
+        }
+    if role == "review" and isinstance(definition.get("risk_review"), dict):
+        return {
+            "model": definition["risk_review"]["model"],
+            "reasoning_effort": definition["risk_review"]["reasoning_effort"],
+        }
     return None
 
 
-def validate_record(record: dict[str, Any], manifest: dict[str, Any]) -> None:
+def validate_provenance(provenance: object, kind: str, task_id: str) -> None:
+    required = {
+        "run_id", "session_ref", "target_revision", "codex_version",
+        "config_digest", "prompt_bundle_digest", "skill_bundle_digest",
+        "fresh_context", "permission_evidence", "root_override",
+    }
+    if not isinstance(provenance, dict) or set(provenance) != required:
+        raise EvalError(f"{task_id} provenance fields are invalid")
+    nonempty_string(provenance["run_id"], f"{task_id} provenance.run_id")
+    if not isinstance(provenance["root_override"], bool):
+        raise EvalError(f"{task_id} provenance.root_override must be boolean")
+    if not isinstance(provenance["fresh_context"], bool):
+        raise EvalError(f"{task_id} provenance.fresh_context must be boolean")
+    nullable_strings = (
+        "session_ref", "target_revision", "codex_version", "config_digest",
+        "prompt_bundle_digest", "skill_bundle_digest", "permission_evidence",
+    )
+    for field in nullable_strings:
+        if provenance[field] is not None:
+            nonempty_string(provenance[field], f"{task_id} provenance.{field}")
+
+    if kind == "observed_model_run":
+        revision = nonempty_string(provenance["target_revision"], f"{task_id} provenance.target_revision")
+        if GIT_OBJECT_RE.fullmatch(revision) is None:
+            raise EvalError(f"{task_id} observed target_revision must be a full Git object id")
+        for field in ("session_ref", "codex_version", "permission_evidence"):
+            nonempty_string(provenance[field], f"{task_id} provenance.{field}")
+        for field in ("config_digest", "prompt_bundle_digest", "skill_bundle_digest"):
+            digest = nonempty_string(provenance[field], f"{task_id} provenance.{field}")
+            if SHA256_RE.fullmatch(digest) is None:
+                raise EvalError(f"{task_id} observed {field} must be a sha256 digest")
+        if provenance["fresh_context"] is not True:
+            raise EvalError(f"{task_id} observed model run must record a fresh context")
+    elif kind == "synthetic_fixture":
+        for field in nullable_strings:
+            if provenance[field] is not None:
+                raise EvalError(f"{task_id} synthetic fixture must not claim {field} provenance")
+        if provenance["fresh_context"] is not False or provenance["root_override"] is not False:
+            raise EvalError(f"{task_id} synthetic fixture has live-run provenance")
+
+
+def validate_usage(value: object, label: str, evidence_kind: str) -> None:
+    required = {"tokens", "codex_usage", "api_cost_usd", "usage_source", "api_cost_source"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise EvalError(f"{label} usage fields are invalid")
+    optional_integer(value["tokens"], f"{label}.tokens")
+    optional_number(value["codex_usage"], f"{label}.codex_usage")
+    optional_number(value["api_cost_usd"], f"{label}.api_cost_usd")
+    if value["usage_source"] not in MEASUREMENT_SOURCES:
+        raise EvalError(f"{label}.usage_source is invalid")
+    if value["api_cost_source"] not in COST_SOURCES:
+        raise EvalError(f"{label}.api_cost_source is invalid")
+    policy = SOURCE_POLICIES[evidence_kind]
+    if value["usage_source"] not in policy["usage"]:
+        raise EvalError(f"{label}.usage_source is inconsistent with {evidence_kind}")
+    if value["api_cost_source"] not in policy["cost"]:
+        raise EvalError(f"{label}.api_cost_source is inconsistent with {evidence_kind}")
+    if value["api_cost_usd"] is None and value["api_cost_source"] not in {"unknown", "synthetic"}:
+        raise EvalError(f"{label}.api_cost_source must be unknown when api_cost_usd is null")
+    if value["api_cost_usd"] is not None and value["api_cost_source"] in {"unknown", "synthetic"}:
+        raise EvalError(f"{label}.api_cost_source must identify a non-null cost")
+
+
+def validate_event(
+    event: object,
+    *,
+    task_id: str,
+    strategy: str,
+    evidence_kind: str,
+    provenance: dict[str, Any],
+    attempt_index: int,
+    event_index: int,
+    invocation_ids: set[str],
+    manifest: dict[str, Any],
+) -> str:
+    required = {
+        "sequence", "invocation_id", "role", "model", "reasoning_effort",
+        "status", "failure_evidence", "usage", "elapsed_seconds", "evidence_refs",
+    }
+    if not isinstance(event, dict) or set(event) != required:
+        raise EvalError(f"{task_id} attempt {attempt_index} event {event_index} has invalid fields")
+    if event["sequence"] != event_index + 1:
+        raise EvalError(f"{task_id} attempt {attempt_index} events must preserve sequence order")
+    invocation_id = nonempty_string(event["invocation_id"], f"{task_id} invocation_id")
+    if invocation_id in invocation_ids:
+        raise EvalError(f"duplicate invocation_id: {invocation_id}")
+    invocation_ids.add(invocation_id)
+    role = event["role"]
+    if role not in ROLES or event["status"] not in STAGE_STATUSES:
+        raise EvalError(f"{task_id} attempt {attempt_index} event {event_index} role/status is invalid")
+    model = nonempty_string(event["model"], f"{task_id} event model")
+    effort = nonempty_string(event["reasoning_effort"], f"{task_id} event reasoning_effort")
+    expected = expected_model(manifest, strategy, role)
+    root_override = role == "root" and provenance["root_override"] is True
+    if strategy == "astra_only" and role == "worker":
+        raise EvalError(f"{task_id} astra_only may not record a worker event")
+    if expected is not None and not root_override and (model != expected["model"] or effort != expected["reasoning_effort"]):
+        raise EvalError(f"{task_id} {strategy} {role} model/effort mismatch")
+    if role != "root" and provenance["root_override"] is True and expected is not None and (model != expected["model"] or effort != expected["reasoning_effort"]):
+        raise EvalError(f"{task_id} only the root event may use root_override")
+    failure = event["failure_evidence"]
+    if event["status"] == "failed":
+        nonempty_string(failure, f"{task_id} failed event {event_index}.failure_evidence")
+    elif failure is not None:
+        raise EvalError(f"{task_id} completed event {event_index} may not carry failure_evidence")
+    validate_usage(event["usage"], f"{task_id} attempt {attempt_index} event {event_index}", evidence_kind)
+    optional_number(event["elapsed_seconds"], f"{task_id} attempt {attempt_index} event {event_index} elapsed_seconds")
+    refs = event["evidence_refs"]
+    if not isinstance(refs, list) or not refs or any(not isinstance(ref, str) or not ref.strip() for ref in refs):
+        raise EvalError(f"{task_id} attempt {attempt_index} event {event_index} needs evidence_refs")
+    return role
+
+
+def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation_ids: set[str] | None = None) -> None:
     required = {
         "task_id", "strategy", "split", "accepted", "attempts", "evidence_kind",
-        "provenance", "task_input", "acceptance_evidence",
+        "provenance", "task_input", "acceptance_evidence", "grade_refs",
     }
     if set(record) != required:
         raise EvalError(f"record fields must be exactly {sorted(required)}")
@@ -148,29 +327,28 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any]) -> None:
     task_id = record["task_id"]
     if task_id not in tasks:
         raise EvalError(f"unknown task_id: {task_id}")
-    if record["strategy"] not in STRATEGIES:
-        raise EvalError(f"unknown strategy: {record['strategy']}")
-    if record["split"] != tasks[task_id]["split"]:
+    strategy = record["strategy"]
+    if strategy not in STRATEGIES:
+        raise EvalError(f"unknown strategy: {strategy}")
+    task = tasks[task_id]
+    if record["split"] != task["split"]:
         raise EvalError(f"split mismatch for {task_id}")
     if not isinstance(record["accepted"], bool):
         raise EvalError(f"accepted must be boolean for {task_id}")
-    if record["evidence_kind"] not in {"live_model_run", "offline_fixture"}:
+    kind = record["evidence_kind"]
+    if kind not in EVIDENCE_KINDS:
         raise EvalError(f"invalid evidence_kind for {task_id}")
+    validate_provenance(record["provenance"], kind, task_id)
     provenance = record["provenance"]
-    if not isinstance(provenance, dict) or set(provenance) != {"run_id", "target_revision", "codex_version"}:
-        raise EvalError(f"{task_id} provenance fields are invalid")
-    nonempty_string(provenance["run_id"], f"{task_id} provenance.run_id")
-    if record["evidence_kind"] == "live_model_run":
-        revision = nonempty_string(provenance["target_revision"], f"{task_id} provenance.target_revision")
-        if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", revision):
-            raise EvalError(f"{task_id} live target_revision must be a full Git object id")
-        nonempty_string(provenance["codex_version"], f"{task_id} provenance.codex_version")
-    elif provenance["target_revision"] is not None or provenance["codex_version"] is not None:
-        raise EvalError(f"{task_id} offline fixture must not claim live revision/version provenance")
-    if record["task_input"] != tasks[task_id]["objective"]:
+    assert isinstance(provenance, dict)
+    if record["task_input"] != task["objective"]:
         raise EvalError(f"task_input mismatch for {task_id}")
+    grade_refs = record["grade_refs"]
+    if not isinstance(grade_refs, list) or not grade_refs or any(not isinstance(ref, str) or not ref.strip() for ref in grade_refs):
+        raise EvalError(f"{task_id} grade_refs must contain reproducible test/diff/grade references")
+
     evidence = record["acceptance_evidence"]
-    criteria = tasks[task_id]["acceptance"]
+    criteria = task["acceptance"]
     if not isinstance(evidence, list) or len(evidence) != len(criteria):
         raise EvalError(f"{task_id} acceptance_evidence must cover every manifest criterion")
     passed: list[bool] = []
@@ -187,48 +365,89 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any]) -> None:
     attempts = record["attempts"]
     if not isinstance(attempts, list) or not attempts:
         raise EvalError(f"attempts must be a non-empty list for {task_id}")
+    all_invocation_ids = invocation_ids if invocation_ids is not None else set()
     for attempt_index, attempt in enumerate(attempts, 1):
-        if not isinstance(attempt, dict) or set(attempt) != {"attempt", "accepted", "stages"}:
+        attempt_required = {"attempt", "accepted", "wall_time_seconds", "wall_time_source", "stages"}
+        if not isinstance(attempt, dict) or set(attempt) != attempt_required:
             raise EvalError(f"{task_id} attempt {attempt_index} has invalid fields")
         if attempt["attempt"] != attempt_index or not isinstance(attempt["accepted"], bool):
             raise EvalError(f"{task_id} attempts must be sequential and carry boolean accepted")
         if attempt_index < len(attempts) and attempt["accepted"]:
             raise EvalError(f"{task_id} only the final attempt may be accepted")
-        stages = attempt["stages"]
-        if not isinstance(stages, list) or not stages:
-            raise EvalError(f"{task_id} attempt {attempt_index} stages must be non-empty")
-        observed: set[str] = set()
+        optional_number(attempt["wall_time_seconds"], f"{task_id} attempt {attempt_index} wall_time_seconds")
+        if attempt["wall_time_source"] not in MEASUREMENT_SOURCES:
+            raise EvalError(f"{task_id} attempt {attempt_index} wall_time_source is invalid")
+        if attempt["wall_time_source"] not in SOURCE_POLICIES[kind]["wall"]:
+            raise EvalError(f"{task_id} attempt {attempt_index} wall_time_source is inconsistent with {kind}")
+        events = attempt["stages"]
+        if not isinstance(events, list) or not events:
+            raise EvalError(f"{task_id} attempt {attempt_index} events must be non-empty")
+        observed_roles: set[str] = set()
         failed = False
-        for stage_index, stage in enumerate(stages):
-            required_stage = {"role", "model", "reasoning_effort", "status", "tokens", "cost_usd"}
-            if not isinstance(stage, dict) or set(stage) != required_stage:
-                raise EvalError(f"{task_id} attempt {attempt_index} stage {stage_index} has invalid fields")
-            role = stage["role"]
-            if role not in ROLES or stage["status"] not in STAGE_STATUSES:
-                raise EvalError(f"{task_id} attempt {attempt_index} stage {stage_index} role/status is invalid")
-            observed.add(role)
-            failed = failed or stage["status"] == "failed"
-            model = nonempty_string(stage["model"], f"{task_id} stage model")
-            effort = nonempty_string(stage["reasoning_effort"], f"{task_id} stage reasoning_effort")
-            expected = expected_model(manifest, record["strategy"], role)
-            if expected is not None and (model != expected["model"] or effort != expected["reasoning_effort"]):
-                raise EvalError(f"{task_id} {record['strategy']} {role} model/effort mismatch")
-            optional_number(stage["tokens"], f"{task_id} attempt {attempt_index} stage {stage_index} tokens")
-            optional_number(stage["cost_usd"], f"{task_id} attempt {attempt_index} stage {stage_index} cost_usd")
-        if "root" not in observed:
+        for event_index, event in enumerate(events):
+            role = validate_event(
+                event,
+                task_id=task_id,
+                strategy=strategy,
+                evidence_kind=kind,
+                provenance=provenance,
+                attempt_index=attempt_index,
+                event_index=event_index,
+                invocation_ids=all_invocation_ids,
+                manifest=manifest,
+            )
+            observed_roles.add(role)
+            failed = failed or event["status"] == "failed"
+        if "root" not in observed_roles:
             raise EvalError(f"{task_id} attempt {attempt_index} must account for root usage")
-        if record["strategy"] == "astra_only" and "worker" in observed:
-            raise EvalError(f"{task_id} astra_only may not record a worker stage")
-        if record["strategy"] == "astra_luna" and "worker" not in observed:
-            raise EvalError(f"{task_id} astra_luna attempt must account for Luna worker usage")
         if not attempt["accepted"] and not failed:
-            raise EvalError(f"{task_id} unsuccessful attempt {attempt_index} must identify a failed stage")
+            raise EvalError(f"{task_id} unsuccessful attempt {attempt_index} must identify a failed event")
         if attempt["accepted"] and failed:
-            raise EvalError(f"{task_id} accepted attempt {attempt_index} may not contain a failed stage")
+            raise EvalError(f"{task_id} accepted attempt {attempt_index} may not contain a failed event")
+    final_roles = {event["role"] for event in attempts[-1]["stages"]}
+    if task["review_required"] and "review" not in final_roles:
+        raise EvalError(f"{task_id} final attempt requires the independent review")
     if attempts[-1]["accepted"] != record["accepted"]:
         raise EvalError(f"{task_id} final attempt outcome must match record accepted")
-    if "review" not in {stage["role"] for stage in attempts[-1]["stages"]}:
-        raise EvalError(f"{task_id} final attempt must account for independent review")
+
+
+def _sum_measurements(
+    rows: list[dict[str, Any]],
+    field: str,
+    source_field: str,
+    allowed_sources: set[str],
+) -> tuple[float | None, str]:
+    values: list[float] = []
+    sources: set[str] = set()
+    complete = True
+    for row in rows:
+        for attempt in row["attempts"]:
+            for event in attempt["stages"]:
+                usage = event["usage"]
+                value = usage[field]
+                source = usage[source_field]
+                sources.add(source)
+                if value is None or source not in allowed_sources:
+                    complete = False
+                else:
+                    values.append(float(value))
+    if not complete or not sources:
+        return None, "unknown"
+    return sum(values), next(iter(sources)) if len(sources) == 1 else "mixed"
+
+
+def _sum_wall_time(rows: list[dict[str, Any]]) -> tuple[float | None, str]:
+    values: list[float] = []
+    sources: set[str] = set()
+    for row in rows:
+        for attempt in row["attempts"]:
+            value = attempt["wall_time_seconds"]
+            source = attempt["wall_time_source"]
+            sources.add(source)
+            if value is None or source not in {"observed", "synthetic"}:
+                return None, "unknown"
+            values.append(float(value))
+    return sum(values), next(iter(sources)) if len(sources) == 1 else "mixed"
 
 
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -237,25 +456,20 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         grouped[(row["evidence_kind"], row["split"], row["strategy"])].append(row)
     output: dict[str, Any] = {"groups": []}
     for (kind, split, strategy), values in sorted(grouped.items()):
-        token_values: list[float] = []
-        cost_values: list[float] = []
-        tokens_complete = True
-        costs_complete = True
-        for row in values:
-            for attempt in row["attempts"]:
-                for stage in attempt["stages"]:
-                    tokens = optional_number(stage["tokens"], "tokens")
-                    cost = optional_number(stage["cost_usd"], "cost_usd")
-                    if tokens is None:
-                        tokens_complete = False
-                    else:
-                        token_values.append(tokens)
-                    if cost is None:
-                        costs_complete = False
-                    else:
-                        cost_values.append(cost)
+        total_tokens, token_basis = _sum_measurements(values, "tokens", "usage_source", {"observed", "synthetic"})
+        total_codex_usage, codex_basis = _sum_measurements(values, "codex_usage", "usage_source", {"observed"})
+        total_account_cost, account_cost_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"account_reported"})
+        total_api_estimate, api_estimate_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"api_estimate"})
+        total_wall, wall_basis = _sum_wall_time(values)
         assigned = len(values)
         accepted = sum(1 for row in values if row["accepted"])
+        event_count = sum(len(attempt["stages"]) for row in values for attempt in row["attempts"])
+        workers = sum(
+            1 for row in values for attempt in row["attempts"] for event in attempt["stages"] if event["role"] == "worker"
+        )
+        reviews = sum(
+            1 for row in values for attempt in row["attempts"] for event in attempt["stages"] if event["role"] == "review"
+        )
         output["groups"].append(
             {
                 "evidence_kind": kind,
@@ -265,15 +479,31 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "accepted_tasks": accepted,
                 "acceptance_rate": accepted / assigned,
                 "attempts": sum(len(row["attempts"]) for row in values),
-                "total_tokens": sum(token_values) if tokens_complete else None,
-                "total_cost_usd": sum(cost_values) if costs_complete else None,
+                "event_count": event_count,
+                "worker_events": workers,
+                "review_events": reviews,
+                "total_tokens": total_tokens,
+                "token_basis": token_basis,
+                "total_codex_usage": total_codex_usage,
+                "codex_usage_basis": codex_basis,
+                "total_cost_usd": total_account_cost,
+                "cost_basis": account_cost_basis,
+                "api_estimate_cost_usd": total_api_estimate,
+                "api_estimate_basis": api_estimate_basis,
+                "total_wall_time_seconds": total_wall,
+                "wall_time_basis": wall_basis,
             }
         )
-    output["claims"] = (
-        "Offline fixtures validate accounting only; they provide no model-quality or savings evidence."
-        if rows and all(row["evidence_kind"] == "offline_fixture" for row in rows)
-        else "Live results are descriptive. A savings claim requires complete usage and comparable accepted-task coverage."
-    )
+    kinds = {row["evidence_kind"] for row in rows}
+    if kinds == {"synthetic_fixture"}:
+        output["claims"] = "Synthetic fixtures validate schema and accounting only; they provide no model-quality, host-usage, or savings evidence."
+    elif kinds == {"manual_record"}:
+        output["claims"] = "Manual records are descriptive bookkeeping; they do not establish observed model quality, host usage, or savings."
+    else:
+        output["claims"] = (
+            "Observed records remain descriptive. Missing usage stays unknown, Codex usage is separate from API USD estimates, "
+            "and a quality or savings conclusion requires comparable pilot/holdout coverage and an external grade."
+        )
     return output
 
 
@@ -294,7 +524,7 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
 
 
 def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser(description="v3 model benchmark plan and result accounting")
+    value = argparse.ArgumentParser(description="adaptive two-arm model evaluation plan and result accounting")
     value.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     group = value.add_mutually_exclusive_group(required=True)
     group.add_argument("--plan", action="store_true")
@@ -317,8 +547,9 @@ def main(argv: list[str] | None = None) -> int:
             raise EvalError("results are empty")
         keys: set[tuple[str, str]] = set()
         run_ids: set[str] = set()
+        invocation_ids: set[str] = set()
         for row in rows:
-            validate_record(row, manifest)
+            validate_record(row, manifest, invocation_ids)
             key = (row["task_id"], row["strategy"])
             if key in keys:
                 raise EvalError(f"duplicate task/strategy result: {key}")
