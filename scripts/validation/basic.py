@@ -20,7 +20,7 @@ MAINTAINER_SKILLS = {"orchestra-contract-validation", "orchestra-runtime-securit
 OPTIONAL_SKILLS = {"create-skill-candidate-from-gap", "open-subrepo-in-vscode"}
 AGENTS = {
     "adventurer": ("gpt-5.6-luna", "max", "workspace-write"),
-    "inquisitor": ("gpt-6-astra", "high", "read-only"),
+    "inquisitor": ("gpt-6-astra", "xhigh", "read-only"),
 }
 
 
@@ -57,9 +57,8 @@ def validate_required_paths() -> None:
 def validate_codex_config() -> None:
     with (ROOT / "template/.codex/config.toml").open("rb") as handle:
         config = tomllib.load(handle)
-    require(set(config) == {"model", "model_reasoning_effort", "model_context_window", "agents", "features"}, "config must keep only distribution-owned settings")
+    require(set(config) == {"model", "model_context_window", "agents", "features"}, "config must keep only distribution-owned settings")
     require(config.get("model") == "gpt-6-astra", "root model must be gpt-6-astra")
-    require(config.get("model_reasoning_effort") == "high", "root effort must default to high")
     require(config.get("model_context_window") == 1_000_000, "model context window must default to 1,000,000 tokens")
     require("model_auto_compact_token_limit" not in config, "v3 must not pin the auto-compact threshold")
     agents_config = config.get("agents")

@@ -8,7 +8,7 @@ metadata:
 
 # orchestra-contract-validation
 
-repositoryの配布物とvalidation経路が、Astra Root、Luna Adventurer、Astra Inquisitor、core/optional/maintainer Skill、stateless Git/snapshot contractへ一致するかをread-onlyで確認します。明示 invocation専用です。
+repositoryの配布物とvalidation経路が、effort未固定のAstra Root、Luna/max Adventurer、Astra/xhigh Inquisitor、core/optional/maintainer Skill、stateless Git/snapshot contractへ一致するかをread-onlyで確認します。明示 invocation専用です。
 
 ## 使う時
 

@@ -4,9 +4,9 @@ This is the compact operating contract for the Guildmaster session. The user req
 
 ## Operating model
 
-- The Guildmaster is the main session. Its default model is `gpt-6-astra` with `high` reasoning, and a user-selected supported effort remains authoritative. Root may read, edit, test, integrate, or finish a small task directly.
+- The Guildmaster is the main session and uses the `gpt-6-astra` model. Its reasoning effort follows the user's selected supported value and is not pinned by the project config. Root may read, edit, test, integrate, or finish a small task directly.
 - Use `adventurer` (`gpt-5.6-luna`, `max`, workspace-write) for one bounded independent implementation, exploration, or focused verification. Give it objective, acceptance criteria, target, authority, and owned paths; it does not spawn agents or integrate other scopes.
-- Use `inquisitor` (`gpt-6-astra`, `high`, read-only) only for a material risk trigger: security, installer/runtime contract, Git or external publication, breaking compatibility, migration, broad blast radius, or an important unresolved question. A repaired and rerun routine check does not require a review by itself.
+- Use `inquisitor` (`gpt-6-astra`, `xhigh`, read-only) only for a material risk trigger: security, installer/runtime contract, Git or external publication, breaking compatibility, migration, broad blast radius, or an important unresolved question. A repaired and rerun routine check does not require a review by itself.
 - Root starts integration by recording the target, initial status/diff, and planned writer union. It preserves pre-existing user edits, checks the integrated diff against that union, and stops to report any outside change. It has no attribution engine and never auto-reverts another writer.
 
 ## Scope and authorization

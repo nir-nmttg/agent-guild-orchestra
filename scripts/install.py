@@ -616,7 +616,7 @@ def distribution_config_snippet(source: Path) -> str:
     # Keep user-owned guidance focused on the settings that determine this
     # distribution's orchestration behavior, while taking their values from
     # the actual source config instead of duplicating defaults here.
-    root_keys = ("model", "model_reasoning_effort", "model_context_window")
+    root_keys = ("model", "model_context_window")
     agents = parsed.get("agents")
     features = parsed.get("features")
     context_management = features.get("context_management") if isinstance(features, dict) else None
@@ -634,14 +634,13 @@ def distribution_config_snippet(source: Path) -> str:
         ] + [features["multi_agent"], context_management["experimental_mode"]]
         if not (
             isinstance(required_values[0], str)
-            and isinstance(required_values[1], str)
-            and isinstance(required_values[2], int)
-            and not isinstance(required_values[2], bool)
-            and isinstance(required_values[3], bool)
-            and isinstance(required_values[4], int)
-            and not isinstance(required_values[4], bool)
+            and isinstance(required_values[1], int)
+            and not isinstance(required_values[1], bool)
+            and isinstance(required_values[2], bool)
+            and isinstance(required_values[3], int)
+            and not isinstance(required_values[3], bool)
+            and isinstance(required_values[4], bool)
             and isinstance(required_values[5], bool)
-            and isinstance(required_values[6], bool)
         ):
             return text.strip()
 
@@ -684,7 +683,7 @@ def build_next_steps(
         "Installation places the distribution but does not activate it.",
         f"Trust the target repository in Codex: {target}.",
         f"Start a new Codex task from the target root: {target}.",
-        "Verify the effective configuration uses gpt-6-astra with high reasoning, a 1,000,000-token model context window, experimental context management, and that the named agents adventurer and inquisitor are available.",
+        "Verify the effective configuration uses gpt-6-astra with the user's selected supported reasoning effort, a 1,000,000-token model context window, experimental context management, and that adventurer (gpt-5.6-luna/max) and inquisitor (gpt-6-astra/xhigh) are available.",
     ]
     if config_mode == "user-owned":
         steps.append(

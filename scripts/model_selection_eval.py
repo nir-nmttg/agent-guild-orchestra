@@ -132,8 +132,8 @@ def validate_manifest(value: dict[str, Any]) -> None:
         raise EvalError("astra_luna implementation must be adaptive Luna/max")
     for label in STRATEGIES:
         review = strategies[label]["risk_review"]
-        if review.get("model") != "gpt-6-astra" or review.get("reasoning_effort") != "high":
-            raise EvalError(f"strategy {label} must use an independent Astra/high risk review")
+        if review.get("model") != "gpt-6-astra" or review.get("reasoning_effort") != "xhigh":
+            raise EvalError(f"strategy {label} must use an independent Astra/xhigh risk review")
 
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:

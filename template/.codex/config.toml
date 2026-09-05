@@ -1,5 +1,4 @@
 model = "gpt-6-astra"
-model_reasoning_effort = "high"
 model_context_window = 1000000
 
 [agents]

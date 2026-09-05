@@ -4,9 +4,9 @@ Agent Guild Orchestra 3はCodexのproject-local configuration、二つのcustom 
 
 ## Rootとdelegation
 
-RootはAstra / highをdefaultにし、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。
+RootはAstra modelを使い、project configでreasoning effortを固定せず、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。
 
-InquisitorはAstra / highのfresh independent read-only reviewerです。security、installer/runtime contract、Git/external publication、breaking compatibility、migration、広いblast radius、important unresolved questionのmaterial triggerでだけ使います。routine check failureを修復して再実行できたことだけでは起動しません。reviewが不要なlow-risk taskは直接完了できます。
+InquisitorはAstra / xhighのfresh independent read-only reviewerです。security、installer/runtime contract、Git/external publication、breaking compatibility、migration、広いblast radius、important unresolved questionのmaterial triggerでだけ使います。routine check failureを修復して再実行できたことだけでは起動しません。reviewが不要なlow-risk taskは直接完了できます。
 
 Rootはintegration前にtarget、全initial status/diff、planned writer unionを記録します。worker結果を統合した後、そのunionと実際の変更を照合し、pre-existing user editを保持します。union外の変更や帰属不明の変更を見つけたら停止して報告します。別writerの変更を自動revertしたり、attribution engineを作ったりしません。
 

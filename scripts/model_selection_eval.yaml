@@ -4,12 +4,12 @@
     "astra_only": {
       "root": {"model": "gpt-6-astra", "reasoning_effort": "high"},
       "implementation": {"mode": "root"},
-      "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "high"}
+      "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "xhigh"}
     },
     "astra_luna": {
       "root": {"model": "gpt-6-astra", "reasoning_effort": "high"},
       "implementation": {"mode": "adaptive", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
-      "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "high"}
+      "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "xhigh"}
     }
   },
   "tasks": [

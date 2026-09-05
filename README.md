@@ -9,7 +9,7 @@ Agent Guild Orchestra 3.0.0は、Codexのproject-local設定、二つのcustom a
 
 ## 動作の概要
 
-Rootはgpt-6-astra / highで動きます。利用者がsessionでreasoning effortを明示した場合は、その選択を優先します。Rootは小さな作業を直接完了でき、分離する価値がある実装をAdventurerへ渡します。Adventurerはgpt-5.6-luna / maxです。security、installer、Git、migration、互換性などのmaterial riskは、実装者から独立したread-onlyのInquisitor（Astra / high）が確認します。
+Rootはgpt-6-astraで動き、reasoning effortはprojectで固定せず、利用者がtask/sessionで選んだsupported値に従います。Rootは小さな作業を直接完了でき、分離する価値がある実装をAdventurerへ渡します。Adventurerはgpt-5.6-luna / maxです。security、installer、Git、migration、互換性などのmaterial riskは、実装者から独立したread-onlyのInquisitor（Astra / xhigh）が確認します。
 
 custom agentはAdventurerとInquisitorだけです。旧版の十role、Quest / Party / Guild、rank、SQLite queue、inbox、Ledger、dashboard、Stop hook、二重settingsは3.0.0にありません。
 
@@ -36,7 +36,7 @@ make validate
 
 インストーラーはcanonical Git rootを照合し、書き込み前に全pathと衝突を検査します。AGENTS.mdはmarkerで囲まれた管理blockだけを更新し、block外を保持します。その他の配布ファイルは.agents/orchestra/install-manifest.jsonへ導入時hashを記録します。
 
-`--config-mode managed`は配布元の`.codex/config.toml`を導入・更新し、`--config-mode user-owned`は既存の設定をbyte-identicalで保持してmanifestへownershipを記録します。user-ownedを選んだ場合も、配布物が要求するAstra/high、`model_context_window = 1000000`、agents enabled/max2、multi_agent、`[features.context_management]`の`experimental_mode = true`を利用者が確認します。installerの成功はファイル配置の成功であり、Codexへのactivationを意味しません。
+`--config-mode managed`は配布元の`.codex/config.toml`を導入・更新し、`--config-mode user-owned`は既存の設定をbyte-identicalで保持してmanifestへownershipを記録します。user-ownedを選んだ場合も、配布物が要求するAstra model、`model_context_window = 1000000`、agents enabled/max2、multi_agent、`[features.context_management]`の`experimental_mode = true`を利用者が確認します。rootのreasoning effortはtask/sessionごとに利用者が選びます。installerの成功はファイル配置の成功であり、Codexへのactivationを意味しません。
 
 ## Codexでの有効化
 

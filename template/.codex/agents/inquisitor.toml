@@ -1,7 +1,7 @@
 name = "inquisitor"
 description = "materialな変更を独立read-onlyで確認し、最終判断を返すrisk-based reviewer。"
 model = "gpt-6-astra"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 
 developer_instructions = """

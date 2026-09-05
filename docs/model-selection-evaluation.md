@@ -1,13 +1,13 @@
 # モデル選択評価
 
-この評価は、Astra-onlyとadaptive Astra+Luna maxの実際のtask結果を、同じtask rubricとverificationで記録するための小さなpilot/holdout手順です。配布設定はAstra Root / high、Luna Adventurer / max、独立Astra / high reviewerです。v2.4 armや固定 worker/review topologyは現行比較の必須条件ではありません。
+この評価は、Astra-onlyとadaptive Astra+Luna maxの実際のtask結果を、同じtask rubricとverificationで記録するための小さなpilot/holdout手順です。評価armではAstra/highのRoot、Luna Adventurer / max、独立Astra / xhigh reviewerを使います。v2.4 armや固定 worker/review topologyは現行比較の必須条件ではありません。
 
 ## 比較する二つのarm
 
 `scripts/model_selection_eval.yaml`のstrategyは次の二つだけです。
 
-1. `astra_only`: Astra/highのRootがtaskを直接実装します。workerは記録しません。risk taskだけ独立Astra/high reviewを付けます。
-2. `astra_luna`: Astra/highのRootが必要と判断した時だけLuna/max workerへ委譲します。worker数はtaskごとに可変で、同じtaskで独立workerを複数記録できます。risk taskのreviewは独立Astra/highです。
+1. `astra_only`: Astra/highのRootがtaskを直接実装します。workerは記録しません。risk taskだけ独立Astra/xhigh reviewを付けます。
+2. `astra_luna`: Astra/highのRootが必要と判断した時だけLuna/max workerへ委譲します。worker数はtaskごとに可変で、同じtaskで独立workerを複数記録できます。risk taskのreviewは独立Astra/xhighです。
 
 各taskの`features`、`risk`、`review_required`はmanifestで先に固定します。実際にworkerやreviewを呼んだか、retryしたか、stageの順序はrecordへそのまま残し、構成から固定しません。Rootのuser model/effort overrideは`provenance.root_override`とRoot stageのeffective `model` / `reasoning_effort`へ記録します。Luna workerと独立reviewのmodel/effortは固定します。
 

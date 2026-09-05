@@ -348,6 +348,8 @@ def validate_install_upgrade_smoke() -> None:
         require(".codex/config.toml" not in owned_manifest["files"], "user-owned config was recorded as a managed file")
         owned_next_steps = json.loads(owned.stdout)["next_steps"]
         require(any("model = \"gpt-6-astra\"" in step for step in owned_next_steps), "user-owned next_steps omitted required model setting")
+        require(not any("model_reasoning_effort" in step for step in owned_next_steps), "user-owned next_steps pinned the root reasoning effort")
+        require(any("inquisitor (gpt-6-astra/xhigh)" in step for step in owned_next_steps), "next_steps omitted Inquisitor model and effort")
         require(any("model_context_window = 1000000" in step for step in owned_next_steps), "user-owned next_steps omitted required context window setting")
         require(any("[features]" in step and "multi_agent = true" in step for step in owned_next_steps), "user-owned next_steps omitted required multi-agent feature setting")
         require(any("[features.context_management]" in step and "experimental_mode = true" in step for step in owned_next_steps), "user-owned next_steps omitted experimental context-management setting")
