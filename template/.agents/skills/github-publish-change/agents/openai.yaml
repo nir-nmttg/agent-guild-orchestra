@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Publish Change"
+  short_description: "差分からPRを準備し、exact承認範囲だけGitHubへ公開します"
+  default_prompt: "$github-publish-change を使い、公開範囲を確認してPR内容を準備してください。"

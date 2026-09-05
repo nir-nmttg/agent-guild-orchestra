@@ -1,0 +1,6 @@
+interface:
+  display_name: "Orchestra Runtime Security Audit"
+  short_description: "runtime境界とhelperのfail-closed安全性を監査します"
+  default_prompt: "$orchestra-runtime-security-audit を明示的に使い、runtimeの安全境界を監査してください。"
+policy:
+  allow_implicit_invocation: false

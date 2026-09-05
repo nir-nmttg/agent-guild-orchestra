@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Git Operations"
+  short_description: "明示範囲でbranchとcommitをgit_guard付きで安全に扱います"
+  default_prompt: "$local-git-operations を使い、指定されたlocal Git操作を対象範囲内で実行してください。"

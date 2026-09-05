@@ -5,7 +5,7 @@
 次を確認してください。
 
 1. [README](README.md)の前提条件、既知の制約、検証手順
-2. [ユースケース集](docs/use-cases/README.md)
+2. [runtime設計](docs/orchestration-runtime.md)と[移行ガイド](docs/migration-v3.md)
 3. 既存のIssue
 4. `make validate`の結果
 

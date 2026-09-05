@@ -32,7 +32,7 @@ assignees: ""
 
 - agent-guild-orchestraのバージョンまたはcommit:
 - OS:
-- Dockerのバージョン:
+- Pythonのバージョン:
 - Codexの利用形態:
 
 ## 検証結果・ログ

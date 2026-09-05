@@ -6,6 +6,19 @@
 
 現在、記録対象の変更はありません。
 
+## [3.0.0] - 2026-09-05
+
+### Breaking changes
+
+- productをCodex向けの静的template distributionへ再設計し、独自scheduler、SQLite queue、inbox、Ledger、dashboard、rank、Stop hook、二重settingsを削除
+- Rootをgpt-6-astra / highへ変更し、利用者のsession overrideを尊重。Rootの直接作業を許可し、custom agentをLuna/maxのAdventurerとAstra/high read-only Inquisitorだけに縮小
+- targetを任意のexplicit canonical Git rootに変更し、guild_root/repositories directory形状の要件を削除
+- statelessなboundary_guard.py、snapshot_digest.py、git_guard.pyへ安全確認を集約。repository指定content filterを実行せず、結果・review・acceptance checkのevidence参照を実objectへ結合
+- default Skillをdesign-review、verify-change、local-git-operations、github-publish-change、interactive-browser-researchの五つへ整理。maintainer二つとoptional二つは明示選択packageへ分離
+- installerをper-install hash manifest、全path preflight、no-op保持、staged transaction、失敗時restoreへ変更。v2からは--major-upgradeと必要に応じた明示的な--legacy-rootで旧managed runtimeをcold archiveし、import / replayしない
+- 旧role / Skill aliasと旧runtime import compatibilityを削除
+- model評価をAstra-only、Astra+Luna/max、frozen v2.4 baselineのwhole-task accounting protocolへ置換。offline fixtureはschema smokeに限定し、live品質・費用削減を主張しない
+
 ## [2.4.0] - 2026-08-23
 
 ### 変更
