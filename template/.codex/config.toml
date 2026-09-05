@@ -1,5 +1,6 @@
 model = "gpt-6-astra"
 model_reasoning_effort = "high"
+model_context_window = 1000000
 
 [agents]
 enabled = true
@@ -7,3 +8,6 @@ max_concurrent_threads_per_session = 2
 
 [features]
 multi_agent = true
+
+[features.context_management]
+experimental_mode = true

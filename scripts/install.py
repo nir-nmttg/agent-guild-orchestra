@@ -616,26 +616,32 @@ def distribution_config_snippet(source: Path) -> str:
     # Keep user-owned guidance focused on the settings that determine this
     # distribution's orchestration behavior, while taking their values from
     # the actual source config instead of duplicating defaults here.
-    root_keys = ("model", "model_reasoning_effort")
+    root_keys = ("model", "model_reasoning_effort", "model_context_window")
     agents = parsed.get("agents")
     features = parsed.get("features")
+    context_management = features.get("context_management") if isinstance(features, dict) else None
     if (
         all(key in parsed for key in root_keys)
         and isinstance(agents, dict)
         and all(key in agents for key in ("enabled", "max_concurrent_threads_per_session"))
         and isinstance(features, dict)
         and "multi_agent" in features
+        and isinstance(context_management, dict)
+        and "experimental_mode" in context_management
     ):
         required_values = [parsed[key] for key in root_keys] + [
             agents[key] for key in ("enabled", "max_concurrent_threads_per_session")
-        ] + [features["multi_agent"]]
+        ] + [features["multi_agent"], context_management["experimental_mode"]]
         if not (
             isinstance(required_values[0], str)
             and isinstance(required_values[1], str)
-            and isinstance(required_values[2], bool)
-            and isinstance(required_values[3], int)
-            and not isinstance(required_values[3], bool)
-            and isinstance(required_values[4], bool)
+            and isinstance(required_values[2], int)
+            and not isinstance(required_values[2], bool)
+            and isinstance(required_values[3], bool)
+            and isinstance(required_values[4], int)
+            and not isinstance(required_values[4], bool)
+            and isinstance(required_values[5], bool)
+            and isinstance(required_values[6], bool)
         ):
             return text.strip()
 
@@ -659,6 +665,9 @@ def distribution_config_snippet(source: Path) -> str:
                 "",
                 "[features]",
                 f"multi_agent = {toml_literal(features['multi_agent'])}",
+                "",
+                "[features.context_management]",
+                f"experimental_mode = {toml_literal(context_management['experimental_mode'])}",
             ]
         )
     return text.strip()
@@ -675,7 +684,7 @@ def build_next_steps(
         "Installation places the distribution but does not activate it.",
         f"Trust the target repository in Codex: {target}.",
         f"Start a new Codex task from the target root: {target}.",
-        "Verify the effective configuration uses gpt-6-astra with high reasoning and that the named agents adventurer and inquisitor are available.",
+        "Verify the effective configuration uses gpt-6-astra with high reasoning, a 1,000,000-token model context window, experimental context management, and that the named agents adventurer and inquisitor are available.",
     ]
     if config_mode == "user-owned":
         steps.append(

@@ -348,7 +348,9 @@ def validate_install_upgrade_smoke() -> None:
         require(".codex/config.toml" not in owned_manifest["files"], "user-owned config was recorded as a managed file")
         owned_next_steps = json.loads(owned.stdout)["next_steps"]
         require(any("model = \"gpt-6-astra\"" in step for step in owned_next_steps), "user-owned next_steps omitted required model setting")
+        require(any("model_context_window = 1000000" in step for step in owned_next_steps), "user-owned next_steps omitted required context window setting")
         require(any("[features]" in step and "multi_agent = true" in step for step in owned_next_steps), "user-owned next_steps omitted required multi-agent feature setting")
+        require(any("[features.context_management]" in step and "experimental_mode = true" in step for step in owned_next_steps), "user-owned next_steps omitted experimental context-management setting")
         owned_again = run_install(config_owned)
         require(owned_again.returncode == 0, owned_again.stderr)
         require(config_path.read_bytes() == user_config and config_path.stat().st_mode == config_mode_before, "no-flag user-owned sync changed config bytes or mode")

@@ -36,7 +36,7 @@ make validate
 
 インストーラーはcanonical Git rootを照合し、書き込み前に全pathと衝突を検査します。AGENTS.mdはmarkerで囲まれた管理blockだけを更新し、block外を保持します。その他の配布ファイルは.agents/orchestra/install-manifest.jsonへ導入時hashを記録します。
 
-`--config-mode managed`は配布元の`.codex/config.toml`を導入・更新し、`--config-mode user-owned`は既存の設定をbyte-identicalで保持してmanifestへownershipを記録します。user-ownedを選んだ場合も、配布物が要求するAstra/high、agents enabled/max2、multi_agentの論理設定は利用者が確認します。installerの成功はファイル配置の成功であり、Codexへのactivationを意味しません。
+`--config-mode managed`は配布元の`.codex/config.toml`を導入・更新し、`--config-mode user-owned`は既存の設定をbyte-identicalで保持してmanifestへownershipを記録します。user-ownedを選んだ場合も、配布物が要求するAstra/high、`model_context_window = 1000000`、agents enabled/max2、multi_agent、`[features.context_management]`の`experimental_mode = true`を利用者が確認します。installerの成功はファイル配置の成功であり、Codexへのactivationを意味しません。
 
 ## Codexでの有効化
 

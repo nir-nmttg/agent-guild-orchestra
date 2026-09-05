@@ -57,17 +57,22 @@ def validate_required_paths() -> None:
 def validate_codex_config() -> None:
     with (ROOT / "template/.codex/config.toml").open("rb") as handle:
         config = tomllib.load(handle)
-    require(set(config) == {"model", "model_reasoning_effort", "agents", "features"}, "config must keep only distribution-owned settings")
+    require(set(config) == {"model", "model_reasoning_effort", "model_context_window", "agents", "features"}, "config must keep only distribution-owned settings")
     require(config.get("model") == "gpt-6-astra", "root model must be gpt-6-astra")
     require(config.get("model_reasoning_effort") == "high", "root effort must default to high")
-    require("model_context_window" not in config and "model_auto_compact_token_limit" not in config, "v3 must not pin context limits")
+    require(config.get("model_context_window") == 1_000_000, "model context window must default to 1,000,000 tokens")
+    require("model_auto_compact_token_limit" not in config, "v3 must not pin the auto-compact threshold")
     agents_config = config.get("agents")
     require(isinstance(agents_config, dict), "config needs an [agents] table")
     require(set(agents_config) == {"enabled", "max_concurrent_threads_per_session"}, "agents config has unrelated settings")
     require(agents_config.get("enabled") is True, "agents.enabled must be true")
     require(agents_config.get("max_concurrent_threads_per_session") == 2, "max concurrent subagent threads must be 2")
     features_config = config.get("features")
-    require(isinstance(features_config, dict) and features_config == {"multi_agent": True}, "multi_agent feature must be enabled explicitly")
+    require(
+        isinstance(features_config, dict)
+        and features_config == {"multi_agent": True, "context_management": {"experimental_mode": True}},
+        "multi-agent and experimental context-management features must be enabled explicitly",
+    )
     for name, (model, effort, sandbox) in AGENTS.items():
         path = ROOT / "template/.codex/agents" / f"{name}.toml"
         with path.open("rb") as handle:
