@@ -1,6 +1,6 @@
 interface:
   display_name: "Open Directory in VS Code"
-  short_description: "明示directoryをexact plan付きでVS Code新規windowへ開きます"
-  default_prompt: "$open-subrepo-in-vscode を明示的に使い、指定directoryを承認付きでVS Codeに開いてください。"
+  short_description: "指定ディレクトリを計画付きで VS Code の新規ウィンドウに開きます"
+  default_prompt: "$open-subrepo-in-vscode を明示的に使い、指定ディレクトリを承認付きで VS Code に開いてください。"
 policy:
   allow_implicit_invocation: false

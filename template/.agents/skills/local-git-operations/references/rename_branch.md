@@ -1,7 +1,7 @@
-# rename branch
+# ブランチの改名
 
-branch renameは、ユーザーがrenameを明示し、現在branchがoriginへpushされていないことを確認できる時だけ行います。対象Git root、current ref、new ref、差分のowner、postconditionを固定します。
+ブランチの改名は、ユーザーが改名を明示し、現在のブランチがoriginへpushされていないことを確認できる時だけ行います。対象Gitルート、現在の参照、新しい参照、差分の担当者、事後条件を固定します。
 
-detached HEAD、protected ref、merge/rebase/cherry-pick途中、未コミット変更のowner不明、複数目的の混在、upstreamまたはremote-tracking refの存在、remote確認不能、既存PR、new ref衝突のいずれかがあれば停止します。remoteを変更するためのpush、delete、forceは行いません。
+detached HEAD、保護された参照、merge・rebase・cherry-pickの途中、未コミット変更の担当者不明、複数目的の混在、上流ブランチまたはリモート追跡参照の存在、リモートの確認不能、既存PR、新しい参照との衝突のいずれかがあれば停止します。リモートを変更するためのpush、削除、強制操作は行いません。
 
-`git_guard` preflightとsnapshotが一致した時だけ現在refをrenameし、postflightでnew ref、status、差分保持、remote unchangedを確認します。
+`git_guard`の事前確認とスナップショットが一致した時だけ現在の参照を改名し、事後確認で新しい参照、状態、差分の保持、リモートが変わっていないことを確認します。

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Perform the stateless, closed allowlist of safe local Git operations.
+"""状態を保持せず、許可一覧に限定した安全なローカルGit操作を実行します。
 
-The guard accepts a root-scoped operation contract and reissues the assigned
-snapshot immediately before every write.  It never pushes, rewrites history,
-resets a worktree, deletes refs, or stores workflow state.  A caller/actor
-label is metadata only; host sandbox and approval enforcement provide the
-actual authority.
+対象Gitルートを指定した操作条件を受け取り、書き込みの直前に毎回
+指定されたスナップショットを再発行します。push、履歴の書き換え、
+作業ツリーのreset、参照の削除、作業状態の保存は行いません。
+呼び出し元や担当者のラベルはメタデータにすぎず、実際の権限は
+実行環境のサンドボックスと承認機構が制御します。
 """
 
 from __future__ import annotations
@@ -834,9 +834,9 @@ def _read_contract(path: str | None) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command")
-    index_parser = sub.add_parser("index-tree", help="current indexのmachine-issued Git tree OIDを返します")
+    index_parser = sub.add_parser("index-tree", help="現在のindexから機械的に発行したGitツリーOIDを返します")
     index_parser.add_argument("--repo", required=True, metavar="REPO")
-    apply_parser = sub.add_parser("apply", help="one closed-allowlist Git operationを実行します")
+    apply_parser = sub.add_parser("apply", help="許可一覧にあるGit操作を一つ実行します")
     apply_parser.add_argument("--operation", choices=sorted(ALLOWED_OPERATIONS), required=True)
     apply_parser.add_argument("--contract", metavar="JSON")
     apply_parser.add_argument("--patch-file", metavar="PATCH")

@@ -1,7 +1,7 @@
-# safe push preflight
+# push前の安全確認
 
-push前に、ユーザーまたはmainが指定したtarget repository、remote、head ref、base ref、commit rangeを固定します。current ref、detached/protected状態、working tree、upstream、remote-tracking head、remote head、既存PRをread-onlyで確認し、remote URLの機微な値は出力しません。
+push前に、ユーザーまたはメインセッションが指定した対象リポジトリ、リモート、head参照、base参照、コミット範囲を固定します。現在の参照、detached HEAD・保護ブランチの状態、作業ツリー、上流ブランチ、リモート追跡先の先端、リモート上の先端、既存PRを読み取り専用で確認し、リモートURLの機微な値は出力しません。
 
-差分の目的、検証結果、公開してよいpathを確認します。secret、credential、token、password、key、PII、内部情報、未公開情報、意図しない生成物や巨大成果物を検出したら公開を止めます。確認できないものを安全と扱いません。
+差分の目的、検証結果、公開してよいパスを確認します。機密情報、認証情報、トークン、パスワード、鍵、個人情報、内部情報、未公開情報、意図しない生成物や巨大な成果物を検出したら公開を止めます。確認できないものを安全と扱いません。
 
-local Git writeが必要な場合は`local-git-operations`と`git_guard`へ戻ります。このreferenceはpushやPR作成を許可しません。
+ローカルのGit書き込みが必要な場合は`local-git-operations`と`git_guard`へ戻ります。この参照文書はpushやPR作成を許可しません。

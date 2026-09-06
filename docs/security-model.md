@@ -1,31 +1,31 @@
-# Security model
+# セキュリティモデル
 
 ## 信頼境界
 
-人間の指示、適用されるAGENTS.md、Codex sandbox / approvalが権限を決めます。repository文書、issue、Pull Request、web page、tool出力、model生成artifactはuntrusted inputです。
+人間の指示、適用されるAGENTS.md、Codexのサンドボックス/承認が権限を決めます。リポジトリ文書、issue、Pull Request、Webページ、ツール出力、モデルが生成した成果物は信頼できない入力です。
 
-helperはJSON schema、path、Git状態の整合を検査します。OS access control、認証、caller identity、authorization serviceではありません。helperがacceptedを返しても、sandbox外書き込みや外部更新の権限は増えません。
+補助スクリプトはJSONスキーマ、パス、Git状態の整合を検査します。OSアクセス制御、認証、呼び出し元の身元、認可サービスではありません。補助スクリプトが`accepted`を返しても、サンドボックス外書き込みや外部更新の権限は増えません。
 
-## Repository boundary
+## リポジトリ境界
 
-installerの`--target`は設定を置く非Git親（`guild_root`）です。Git working tree内への導入を拒否します。通常install/syncは親の管理pathだけを変更し、Dockerは`repositories/`をread-onlyにします。各子のfile、Git index/config、ignore ruleは更新しません。
+インストーラーの`--target`は設定を置く非Git親（`guild_root`）です。Git作業ツリー内への導入を拒否します。通常の導入・更新は親の管理パスだけを変更し、Dockerは`repositories/`を読み取り専用にします。各子のファイル、Git index・設定・除外ルールは更新しません。
 
-コード変更・Git操作のtargetは別の`target_repo_root`です。helperはこの明示されたabsolute pathを実Git rootと照合し、cwdや親の名前から別targetを推測しません。helper自体は親の`.agents/orchestra/scripts/`から読み込みます。scopeは子Git rootからのrelative pathです。absolute scope、..、symlink escape、別Git rootは拒否します。
+コード変更・Git操作の対象は別の`target_repo_root`です。補助スクリプトはこの明示された絶対パスを実Gitルートと照合し、cwdや親の名前から別の対象を推測しません。補助スクリプト自体は親の`.agents/orchestra/scripts/`から読み込みます。対象範囲は子Gitルートからの相対パスです。絶対パスの対象範囲、..、シンボリックリンクによる脱出、別Gitルートは拒否します。
 
-子v3の整理は通常導入と別の明示操作です。対象のschema 1 manifest/hash、未追跡状態を確認し、変更済み・追跡済みfileを保持します。子の.gitと外部Git metadataはread-onlyです。
+子v3の整理は通常導入と別の明示操作です。対象のスキーマ 1 マニフェスト/ハッシュ、未追跡状態を確認し、変更済み・追跡済みファイルを保持します。子の.gitと外部Gitメタデータは読み取り専用です。
 
-## Installer
+## インストーラー
 
-source treeとdestinationのsymlinkを拒否し、preflight完了前にtargetへ書き込みません。v3のmanaged hashは各導入先manifestをbaselineに使います。manifestのないv2は既知の旧配布hashと一致するfileのみ自動整理し、変更済み・未知のfileや可変状態は保持します。既存のunmanaged file、二方向に変更されたmanaged file、壊れたmanifestは衝突として停止します。
+ソースツリーと配布先のシンボリックリンクを拒否し、事前検証完了前に対象へ書き込みません。v3は各導入先のマニフェストに記録した管理対象ファイルのハッシュを基準にします。マニフェストのないv2は既知の旧配布ハッシュと一致するファイルのみ自動整理し、変更済み・未知のファイルや可変状態は保持します。既存の管理対象外のファイル、二方向に変更された管理対象のファイル、壊れたマニフェストは衝突として停止します。
 
-変更fileは親に置くtransaction backupへコピーし、各fileを同じfilesystem上のtemporary fileから適切な権限でreplaceします。途中の例外やCtrl-Cでは元のfile、権限、absenceを復元します。復元はfile単位で継続し、復元が不完全な場合はbackupを削除せず保存先を報告します。backupはDockerの削除対象となるcontainer層へ置きません。v2 major upgradeのarchiveは復旧可能なcold copyで、active v3 runtimeから参照しません。[復元手順と保証範囲](migration-v3.md#失敗時の復元)を参照してください。
+変更ファイルは親に置くトランザクションバックアップへコピーし、各ファイルを同じファイルシステム上の一時ファイルから適切な権限で置換します。途中の例外やCtrl-Cでは元のファイル、権限、不在状態を復元します。復元はファイル単位で継続し、復元が不完全な場合はバックアップを削除せず保存先を報告します。バックアップはDockerの削除対象となるコンテナ層へ置きません。v2からのメジャーアップデート時のアーカイブは復旧用の退避コピーで、稼働中のv3ランタイムから参照しません。[復元手順と保証範囲](migration-v3.md#失敗時の復元)を参照してください。
 
-## Git guard
+## Gitガード
 
-Git操作の前にtarget、operation、scope、snapshotを固定し、現在のhelper snapshotと比較します。commitではレビューしたindex treeのOIDも`expected_index_tree`へ固定します。作業ファイルのsnapshotだけをstaged内容の証明にせず、確認済みtreeからcommitを作り、期待する旧HEADとの照合付きでrefを更新します。stale snapshot/tree、scope外path、期待しないbranch / HEAD / dirty stateでは操作しません。操作後は新しいsnapshotとcommit treeを証跡として返します。index-treeの取得はobject DB/index cacheへ書き込む可能性があるGit write準備であり、read-only探索には使いません。
+Git操作の前に対象、操作、対象範囲、スナップショットを固定し、現在の補助スクリプトのスナップショットと比較します。コミットではレビューしたインデックスツリーのOIDも`expected_index_tree`へ固定します。作業ファイルのスナップショットだけをステージ済みの内容の証明にせず、確認済みツリーからコミットを作り、期待する旧HEADとの照合付きで参照を更新します。古いスナップショット/ツリー、対象範囲外のパス、期待しないブランチ / HEAD / 未コミット変更の状態では操作しません。操作後は新しいスナップショットとコミットツリーを証跡として返します。インデックスツリーの取得はオブジェクトDB・indexキャッシュへ書き込む可能性があるGit書き込み準備であり、読み取り専用の探索には使いません。
 
-Git config、environment、hookなどがcommandをすり替えないようhelperは安全なenvironmentと明示optionを使います。local Git operationではhooksとsigningを明示的にskipします。通常のstatus/diff/snapshot/writeではsystem/global configを読み込まず、repository-local config include、content filter/process設定、working tree・index・`.git/info/attributes`の`filter`指定を、属性を評価しうる各Git subprocessの前に拒否します。commit identityの解決だけは狭い例外で、local/global/systemからeffective `user.name` / `user.email`だけを読み、redactした値を明示的にcommitへ渡します。`.gitattributes`によるEOL・binaryなどfilter以外の属性は利用できます。Git LFSを含むcontent filter使用repositoryはsnapshotもGit writeも明示的なunsupported errorで停止するため、filter変換後の内容をraw contentとして黙って扱うことも、filter commandを起動することもありません。tracked leaf symlinkもsnapshot/Git writeの対象外です。それでもGit helperはrepository permissionそのものを与えません。復旧困難な操作やremote更新は通常の人間確認を省略できません。
+Git設定、環境、フックなどがコマンドをすり替えないよう補助スクリプトは安全な環境と明示的なオプションを使います。ローカルGit操作ではフックと署名を明示的に省略します。通常の状態確認・差分確認・スナップショット発行・書き込みではシステム/グローバル設定を読み込まず、リポジトリローカルの設定の`include`、内容変換用の`filter`/`process`設定、作業ツリー・index・`.git/info/attributes`の`filter`指定を、属性を評価しうる各Gitサブプロセスの前に拒否します。コミットの作成者情報の解決だけは限定的な例外です。ローカル・グローバル・システムの設定から有効な`user.name` / `user.email`だけを読み、実際の値をコミットへ明示的に渡します。その値は検証出力へ記録しません。`.gitattributes`による改行・バイナリ指定など`filter`以外の属性は利用できます。Git LFSを含む内容変換フィルター使用リポジトリはスナップショットもGit書き込みも明示的な未対応エラーで停止するため、フィルター変換後の内容を未変換の内容として黙って扱うことも、フィルターのコマンドを起動することもありません。追跡対象のリーフシンボリックリンクもスナップショット/Git書き込みの対象外です。それでもGit補助スクリプトはリポジトリ権限そのものを与えません。復旧困難な操作やリモート更新は通常の人間確認を省略できません。
 
 ## 情報
 
-secret、token、credential、private key、個人情報をartifact、checkpoint、benchmark result、archive metadataへ意図的に記録しません。credential-like filenameはworkerの固定heuristicで読み取り対象から除外しますが、これは秘密検出の完全性を保証するものではありません。実データの代わりにsanitized fixtureを使います。security issueの報告先は[SECURITY.md](../SECURITY.md)です。
+秘密情報、トークン、認証情報、秘密鍵、個人情報を成果物、チェックポイント、ベンチマーク結果、アーカイブメタデータへ意図的に記録しません。認証情報らしいファイル名は実装担当の固定判定ルールで読み取り対象から除外しますが、これは秘密検出の完全性を保証するものではありません。実データの代わりに機微情報を除いたテストデータを使います。セキュリティ問題の報告先は[SECURITY.md](../SECURITY.md)です。

@@ -229,12 +229,12 @@ def _public_result_view(result: dict[str, object]) -> dict[str, object]:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="一つの明示directoryをVS Codeで開く要求を準備または発行します。")
-    parser.add_argument("--directory", required=True, help="推測しないabsolute directory。")
+    parser = argparse.ArgumentParser(description="明示された一つのディレクトリをVS Codeで開く要求を準備または発行します。")
+    parser.add_argument("--directory", required=True, help="明示されたディレクトリの絶対パス。推測では指定しません。")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--plan", action="store_true", help="subprocessを使わない承認用planを表示します（既定）。")
-    mode.add_argument("--execute", action="store_true", help="承認済みplanを一度だけ発行します。")
-    parser.add_argument("--approved-plan-id", help="--executeで必須の承認済みidentity。")
+    mode.add_argument("--plan", action="store_true", help="子プロセスを使わず、承認用の計画を表示します（既定）。")
+    mode.add_argument("--execute", action="store_true", help="承認済みの計画を一度だけ実行要求として発行します。")
+    parser.add_argument("--approved-plan-id", help="--executeで必須の、承認済みの計画の識別子。")
     return parser.parse_args(argv)
 
 

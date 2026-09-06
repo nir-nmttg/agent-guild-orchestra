@@ -242,7 +242,7 @@ def validate(target_repo_root: Path, candidate: Path, active_skills_root: Path |
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="一つの隔離 Skill candidateを変更せず検証します。")
+    parser = argparse.ArgumentParser(description="隔離された一つのSkill候補を変更せず検証します。")
     parser.add_argument("--target-repo-root", required=True)
     parser.add_argument("--candidate-path", required=True)
     parser.add_argument("--active-skills-root")

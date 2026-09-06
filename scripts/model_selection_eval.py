@@ -540,7 +540,7 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
 
 
 def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser(description="adaptive two-arm model evaluation plan and result accounting")
+    value = argparse.ArgumentParser(description="状況に応じた委譲の有無を比べる、モデル評価計画と結果集計")
     value.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     group = value.add_mutually_exclusive_group(required=True)
     group.add_argument("--plan", action="store_true")

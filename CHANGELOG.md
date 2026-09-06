@@ -4,6 +4,7 @@
 
 ## [Unreleased]
 
+- AGENTS.md、ロール指示、Skill本文・参照手順・説明、評価用プロンプト、運用文書を日本語化。Skillの表示名、モデル設定、操作識別子、権限境界は維持
 - 更新・子整理の例外/Ctrl-Cで復元し、復元失敗や再中断ではDocker削除後も親に復旧backupを保持。不要なcandidateの一時disk複製を削除
 - AGENTS.mdの既存権限と管理fileのmode変更を保持し、旧v2の既知の配布modeも区別
 - commitをレビュー済みindex treeへ固定し、同一pathのindex差し替えを検知。Git操作例の不要な宣言項目と固定temporary filenameを整理

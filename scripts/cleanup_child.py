@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit, hash-checked retirement of an earlier repository-local v3 install."""
+"""子リポジトリ内に導入した旧v3の配布物を、明示指定とハッシュ照合に基づいて整理します。"""
 
 from __future__ import annotations
 
@@ -126,8 +126,8 @@ def execute(parent: Path, child: Path, dry_run: bool) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True, type=Path, help="installed non-Git parent")
-    parser.add_argument("--child", required=True, type=Path, help="one explicit old v3 child Git root")
+    parser.add_argument("--target", required=True, type=Path, help="導入済みのGit管理外の親ディレクトリ")
+    parser.add_argument("--child", required=True, type=Path, help="旧v3を導入した子Gitルートを一つだけ明示指定")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:

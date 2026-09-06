@@ -147,13 +147,13 @@ class Rpc:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Maintainer-only Codex native parent activation smoke.")
-    parser.add_argument("--target-repo-root", default=str(REPO_ROOT), help="Git repository containing template/.")
-    parser.add_argument("--codex", default=os.environ.get("CODEX_BIN") or shutil.which("codex") or "codex", help="Codex executable or CODEX_BIN.")
-    parser.add_argument("--output", help="JSON path (default: tempfile.gettempdir()/codex-parent-smoke-*.json).")
-    parser.add_argument("--live", action="store_true", help="Request two bounded native named-agent turns.")
-    parser.add_argument("--live-timeout", type=float, default=45.0, help="Seconds per live turn (default: 45).")
-    parser.add_argument("--keep-fixture", action="store_true", help="Keep disposable parent/child; temporary auth home is still removed.")
+    parser = argparse.ArgumentParser(description="保守担当者向けの、Codexの親設定・エージェント起動の実機確認。")
+    parser.add_argument("--target-repo-root", default=str(REPO_ROOT), help="template/を含むGitリポジトリ。")
+    parser.add_argument("--codex", default=os.environ.get("CODEX_BIN") or shutil.which("codex") or "codex", help="Codex実行ファイルのパス（CODEX_BINでも指定可能）。")
+    parser.add_argument("--output", help="結果JSONのパス（既定: OSの一時ディレクトリ/codex-parent-smoke-*.json）。")
+    parser.add_argument("--live", action="store_true", help="時間制限付きで、名前付きエージェントを実際に呼び出す最大2ターンを要求。")
+    parser.add_argument("--live-timeout", type=float, default=45.0, help="実呼び出しの1ターン当たりの制限秒数（既定: 45）。")
+    parser.add_argument("--keep-fixture", action="store_true", help="検証用の親・子を残す。一時的な認証設定ディレクトリは削除する。")
     return parser.parse_args(argv)
 
 
@@ -228,7 +228,7 @@ def make_fixture(source: Path) -> tuple[Path, Path]:
         (child_codex / "config.toml").write_text('model = "child-collision-model"\n\n[agents]\nenabled = false\n', encoding="utf-8")
         skill = child / ".agents" / "skills" / "child-collision"
         skill.mkdir(parents=True)
-        (skill / "SKILL.md").write_text("---\nname: child-collision\ndescription: child-only collision\n---\nchild\n", encoding="utf-8")
+        (skill / "SKILL.md").write_text("---\nname: child-collision\ndescription: 子だけに配置したSkillの競合確認用。\n---\n子リポジトリ専用の検証用Skillです。\n", encoding="utf-8")
         return parent, child
     except BaseException:
         shutil.rmtree(parent, ignore_errors=True)
@@ -379,9 +379,9 @@ def live_probe(
     blocked: str | None = None
     for index, (effort, agent) in enumerate((("low", "adventurer"), ("xhigh", "inquisitor")), 1):
         prompt = (
-            f"Native activation smoke. Use exactly one native collaboration spawn selecting named agent `{agent}`. "
-            f"Ask it to read-only inspect parent={parent} and child Git root={child}; it must not write, mutate Git, "
-            "or spawn another agent. Invoke the native tool and wait for it."
+            f"Codex標準のエージェント起動を確認します。名前付きエージェント`{agent}`を選び、標準の協調機能でちょうど1回起動してください。"
+            f"そのエージェントに親={parent}と子Gitルート={child}を読み取り専用で調べさせてください。"
+            "書き込み、Gitの変更、別のエージェントの起動は行わせません。標準ツールを実行し、完了を待ってください。"
         )
         response = rpc.call("turn/start", {"threadId": parent_thread, "input": [{"type": "text", "text": prompt}], "effort": effort})
         if "error" in response:

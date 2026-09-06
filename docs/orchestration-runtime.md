@@ -1,31 +1,31 @@
-# v3 orchestration
+# v3オーケストレーション
 
-Agent Guild Orchestra 3はCodexのproject-local configuration、二つのcustom agent、core Skill、stateless Git/snapshot helperを配布します。会話履歴とCodex native task/messageが作業状態です。独自queue、scheduler、database、inbox、status machineはありません。
+Agent Guild Orchestra 3はCodexのプロジェクト固有設定、二つのカスタムエージェント、標準Skill、状態を持たないGit/スナップショット補助スクリプトを配布します。会話履歴とCodex標準のタスク/メッセージが作業状態です。独自キュー、スケジューラー、データベース、受信箱、状態機械はありません。
 
 ## 起動場所と作業対象
 
-設定は非Git親`guild_root`に一組だけ置き、その親をCodexでtrustして新しいlocal taskを開始します。子Git repositoryは`repositories/`に置きます。親の設定・Skill探索を維持するためsessionの基点を親に保ち、コード変更commandは明示workdir、Git commandは実Git rootを指定します。各childとnested pathのAGENTS指示を先に読み、子設定との競合を報告します。設定探索の実測と限界は[親配置](parent-layout.md)を参照してください。
+設定は非Git親`guild_root`に一組だけ置き、その親をCodexで信頼して新しいローカルタスクを開始します。子Gitリポジトリは`repositories/`に置きます。親の設定・Skill探索を維持するためセッションの基点を親に保ち、コード変更コマンドは明示した作業ディレクトリ、Gitコマンドは実Gitルートを指定します。各子とネストしたパスのAGENTS指示を先に読み、子設定との競合を報告します。設定探索の実測と限界は[親配置](parent-layout.md)を参照してください。
 
-委譲には`guild_root`と対象の`target_repo_root`を渡します。helperは前者から読み込み、snapshot/guardは後者を検証します。複数repositoryを扱う場合、Git操作の対象と承認・snapshotをrepositoryごとに分けます。インストールと更新のDocker containerは終了時に削除され、常駐runtimeにはなりません。
+委譲には`guild_root`と対象の`target_repo_root`を渡します。補助スクリプトは前者から読み込み、スナップショット/Gitガードは後者を検証します。複数リポジトリを扱う場合、Git操作の対象と承認・スナップショットをリポジトリごとに分けます。インストールと更新のDockerコンテナは終了時に削除され、常駐ランタイムにはなりません。
 
-## Rootとdelegation
+## Rootと委譲
 
-RootはAstra modelを使い、project configでreasoning effortを固定せず、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。hostのnative interfaceでnamed agentまたは明示model/effortを選び、Rootのmodelを意図せず継承させません。独立した作業には、hostが対応する短い独立contextを渡します。role選択が利用できない場合はその制約を報告します。
+RootはAstraモデルを使い、プロジェクト設定で推論レベルを固定せず、利用者が選択した対応範囲内の推論レベルを尊重します。小さな一続きの作業はRootが直接終え、十分に独立した限定範囲の作業だけをAdventurerへ渡します。AdventurerはLuna / maxの実装担当で、追加エージェントや対象範囲をまたぐ統合を行いません。ホスト標準のインターフェースで名前付きエージェントまたは明示したモデル/推論レベルを選び、Rootのモデルを意図せず継承させません。独立した作業には、ホストが対応する短い独立コンテキストを渡します。ロール選択が利用できない場合はその制約を報告します。
 
-InquisitorはAstra / xhighのfresh independent read-only reviewerです。security、installer/runtimeやGit安全契約の変更、影響の大きい外部公開、breaking compatibility、migration、広いblast radius、important unresolved questionのmaterial triggerでだけ使います。通常のlocal branch/stage/commitやroutine check failureの修復再実行だけでは起動しません。reviewが不要なlow-risk taskは直接完了できます。
+InquisitorはAstra / xhighの新しい独立した読み取り専用レビュアーです。セキュリティ、インストーラー/ランタイムやGit安全契約の変更、影響の大きい外部公開、互換性を壊す変更、移行、広い影響範囲、重要な未解決事項という重大なトリガーがある場合だけ使います。通常のローカルでのブランチ/ステージ/コミットや定常チェック失敗の修復再実行だけでは起動しません。レビューが不要な低リスクのタスクは直接完了できます。
 
-Rootはintegration前にtarget、全initial status/diff、planned writer unionを記録します。worker結果を統合した後、そのunionと実際の変更を照合し、pre-existing user editを保持します。union外の変更や帰属不明の変更を見つけたら停止して報告します。別writerの変更を自動revertしたり、attribution engineを作ったりしません。
+Rootは統合前に対象、初期状態/差分全体、各担当者の書き込み予定パスの和集合を記録します。ワーカーの結果を統合した後、その和集合と実際の変更を照合し、既存のユーザー編集を保持します。和集合外の変更や帰属不明の変更を見つけたら停止して報告します。別の担当者の変更を自動で取り消したり、帰属判定エンジンを作ったりしません。
 
-## Native handoffとresult
+## Codex標準の引き継ぎと結果
 
-handoffはpurpose、objective、acceptance criteria、target、owned scope、authorityだけを短く渡します。workerのresultはchanges、tests、unresolved issues、unrun checksと理由、snapshot evidence（取得した場合）を返します。大きなassignment/result/review schemaや常駐artifact workflowを追加しません。
+引き継ぎは目的、目標、受け入れ条件、対象、担当する対象範囲、権限だけを短く渡します。ワーカーの結果は変更、テスト、未解決事項、未実行のチェックと理由、スナップショットの証拠（取得した場合）を返します。大きな割り当て/結果/レビューのスキーマや常駐成果物ワークフローを追加しません。
 
-Codexのworker上限は設定値であり、tokenやcostの上限ではありません。完了したworkerをcloseできるnative lifecycleが公開されている場合はreview前に閉じます。close機能がhostにない場合、空きslot不足を正確に報告し、cleanup serviceを発明しません。
+Codexのワーカー上限は設定値であり、トークンや費用の上限ではありません。完了したワーカーを終了できるネイティブなライフサイクルが公開されている場合はレビュー前に閉じます。終了機能がホストにない場合、空きスロット不足を正確に報告し、クリーンアップサービスを発明しません。
 
-## Gitとsnapshot
+## Gitとスナップショット
 
-Git writeまたは明示的なstale-risk確認の時だけ`snapshot_digest`を使います。探索だけでsnapshotを作りません。`git_guard`はexact operation、target、scope、pre-snapshotを照合し、限定されたlocal Git write後にpost-snapshotを返します。commitは準備時に発行・レビューした`expected_index_tree`へ固定し、そのtreeと期待する旧HEADでcommitします。両helperはcaller identityやrepository permissionを証明しません。
+Git書き込み時、または根拠が古くなるリスクを明示的に確認する時だけ`snapshot_digest`を使います。探索だけでスナップショットを作りません。`git_guard`は正確な操作、対象、対象範囲、事前スナップショットを照合し、限定されたローカルGit書き込み後に事後スナップショットを返します。コミットは準備時に発行・レビューした`expected_index_tree`へ固定し、そのツリーと期待する旧HEADでコミットします。両補助スクリプトは呼び出し元の身元やリポジトリ権限を証明しません。
 
-content-unchanged stageは追加のmodel reviewを発生させません。hooksとsigningはhelperが明示的にskipします。Git LFS/content-filter repository、content filter/process設定、tracked leaf symlinkはsnapshot/Git writeのunsupported境界として停止します。credential-like filenameはworkerの固定heuristicで読み取り対象から除外し、結果へ内容を記録しません。
+ステージ前後で内容が変わらないことだけでは、モデルによる追加レビューを要求しません。フックと署名は補助スクリプトが明示的にスキップします。Git LFSなどの内容変換フィルターを使うリポジトリ、内容変換用の`filter`/`process`設定、追跡対象のリーフシンボリックリンクはスナップショット/Git書き込みの未対応境界として停止します。認証情報らしいファイル名は実装担当の固定判定ルールで読み取り対象から除外し、結果へ内容を記録しません。
 
-通常の作業はnative historyで足ります。明示的な中断再開が必要な時だけ、target、scope、現在のsnapshot、完了check、unresolved issue、次のactionを含むsanitized checkpointを使います。
+通常の作業はCodex標準の履歴で足ります。明示的な中断再開が必要な時だけ、対象、対象範囲、現在のスナップショット、完了したチェック、未解決事項、次の対応を含み、機微情報を除いたチェックポイントを使います。

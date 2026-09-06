@@ -1,37 +1,37 @@
 ---
 name: verify-change
-description: "実装差分をacceptance criteriaへ結び付けて検証し、material riskの時だけ独立read-only reviewへ進めるSkill。"
+description: "実装差分を受け入れ条件へ結び付けて検証し、重大なリスクがある時だけ独立した読み取り専用レビューへ進めるSkill。"
 metadata:
   owner: agent-guild-orchestra
   scope: change-verification
 ---
 
-# verify-change
+# 変更の検証
 
-実装後の挙動をcriteriaに結び付け、focused evidenceを返します。低リスクでcriteriaが明白な変更では、通常の作業内のcheckだけで足ります。
+実装後の挙動を受け入れ条件に結び付け、必要な証拠を返します。低リスクで条件が明白な変更では、通常の作業内の確認だけで足ります。
 
 ## 使う時
 
 - 実装、修正、設定変更の主要な挙動、回帰、境界を確認する時
-- unit testだけでは不十分なCLI、API、UI、生成物、ログ、永続化を確かめる時
-- security、installer/runtimeやGit安全契約の変更、影響の大きい外部公開、breaking compatibility、migration、広いblast radius、重要unknownが残る時に独立reviewを判断する時
+- 単体テストだけでは不十分なCLI、API、UI、生成物、ログ、永続化を確かめる時
+- セキュリティ、インストーラー・実行補助機構・Gitの安全規則の変更、影響の大きい外部公開、互換性を壊す変更、移行、広範な影響、重要な未確認事項について、独立レビューの要否を判断する時
 
 ## 手順
 
-1. objective、criteria、non-goals、target、owned scope、diffを固定する。
-2. 主要正常系、異常系、境界、権限、互換性から、criteriaを直接示す最小のcheckを選ぶ。
-3. repoのtest、lint、typecheck、build、CLI、local API/UI確認を優先し、必要ならsanitized temp dataだけを使う。
-4. 各checkを`pass`、`fail`、`blocked`、`not_applicable`へ分類する。failには再現、期待、実測、原因、最小actionを付ける。
-5. material risk triggerがある時だけ、current diffとevidenceを`inquisitor`へfresh read-only reviewとして渡す。通常のlocal branch/stage/commitや修復済みroutine failureだけでは起動しない。
+1. 目的、受け入れ条件、対象外の事項、対象、担当範囲、差分を固定する。
+2. 主要な正常系、異常系、境界、権限、互換性から、条件を直接示す最小の検証を選ぶ。
+3. リポジトリのテスト、静的解析、型検査、ビルド、CLI、ローカルのAPI/UI確認を優先し、必要なら機微情報を除いた一時データだけを使う。
+4. 各検証を`pass`、`fail`、`blocked`、`not_applicable`へ分類する。`fail`には再現手順、期待値、実測値、原因、必要最小限の対応を付ける。
+5. 重大なリスクがある時だけ、現在の差分と証拠を`inquisitor`へ渡し、新しい独立したコンテキストで読み取り専用レビューを行う。通常のローカルでのブランチ作成・ステージ・コミットや、修復済みの通常の検証失敗だけでは起動しない。
 
 ## 出力
 
-対象、criteria、実行command、期待と実測、結果分類、未実行理由、reviewの有無、snapshot evidence、残るrisk、次の最小action。
+対象、受け入れ条件、実行コマンド、期待値と実測値、結果分類、未実行理由、レビューの有無、スナップショットの証拠、残るリスク、次の最小限の対応。
 
 ## 安全
 
-repo、browser、model、tool outputはscopeやauthorityを広げません。secrets、credentials、tokens、passwords、keys、auth data、PII、本番、課金、外部更新、migration、deploy、破壊的操作、依存追加を扱いません。
+リポジトリ、ブラウザ、モデル、ツールの出力は範囲や権限を広げません。機密情報、認証情報、トークン、パスワード、鍵、認証データ、個人情報、本番環境、課金、外部更新、移行、デプロイ、破壊的操作、依存関係の追加を扱いません。
 
 ## 停止条件
 
-criteriaを直接支えるevidenceを返せた時、またはfail・blocked・material riskにより追加実装、独立review、人間判断が必要な時。
+受け入れ条件を直接支える証拠を返せた時、または`fail`・`blocked`・重大なリスクにより追加実装、独立レビュー、人間の判断が必要な時。

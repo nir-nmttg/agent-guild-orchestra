@@ -1,6 +1,6 @@
 interface:
   display_name: "Create Skill Candidate from Gap"
-  short_description: "検証済みの能力ギャップから隔離候補をexact pathへ作成します"
-  default_prompt: "$create-skill-candidate-from-gap を明示的に使い、sanitized evidenceからSkill候補を作成してください。"
+  short_description: "検証済みの能力ギャップから隔離候補を指定パスに作成します"
+  default_prompt: "$create-skill-candidate-from-gap を明示的に使い、機微情報を除いた証拠から Skill 候補を作成してください。"
 policy:
   allow_implicit_invocation: false

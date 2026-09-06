@@ -16,38 +16,38 @@
     {
       "id": "pilot-installer-conflict",
       "split": "pilot",
-      "objective": "Diagnose and fix a managed-file update conflict without losing user edits.",
+      "objective": "ユーザーの編集を失わずに、管理対象ファイルの更新競合を調査・修正してください。",
       "features": ["installer", "conflict", "preservation"],
       "risk": "high",
       "review_required": true,
-      "acceptance": ["conflict reproduced", "user edit preserved", "targeted checks pass"]
+      "acceptance": ["競合を再現できる", "ユーザーの編集が保持される", "対象を絞った検証が成功する"]
     },
     {
       "id": "pilot-boundary-negative",
       "split": "pilot",
-      "objective": "Add a negative test for a repository-boundary escape.",
+      "objective": "リポジトリ境界の外へ逸脱する操作を拒否する異常系テストを追加してください。",
       "features": ["validation", "path-boundary", "negative-test"],
       "risk": "low",
       "review_required": false,
-      "acceptance": ["escape rejected", "valid root accepted", "test passes"]
+      "acceptance": ["境界外への逸脱が拒否される", "正当なルートが受理される", "テストが成功する"]
     },
     {
       "id": "holdout-cross-file-change",
       "split": "holdout",
-      "objective": "Implement a bounded change spanning code, documentation, and validation.",
+      "objective": "コード、文書、検証にまたがる、範囲を限定した変更を実装してください。",
       "features": ["cross-file", "documentation", "validation"],
       "risk": "medium",
       "review_required": false,
-      "acceptance": ["behavior works", "docs match", "relevant validation passes"]
+      "acceptance": ["期待した動作が実現する", "文書と実装が一致する", "関連する検証が成功する"]
     },
     {
       "id": "holdout-security-review",
       "split": "holdout",
-      "objective": "Review a Git helper change for scope and snapshot bypasses.",
+      "objective": "Git補助スクリプトの変更をレビューし、対象範囲やスナップショットの検証を迂回できないか確認してください。",
       "features": ["security", "Git", "snapshot"],
       "risk": "high",
       "review_required": true,
-      "acceptance": ["material risks identified", "claims cite evidence", "disposition is actionable"]
+      "acceptance": ["重大なリスクが特定される", "主張に証拠が示される", "判断結果から具体的な対応を決められる"]
     }
   ]
 }

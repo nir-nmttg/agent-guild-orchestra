@@ -1,25 +1,25 @@
-# Orchestra runtime
+# Orchestraの実行補助機構
 
-`AGENTS.md` is the compact model-facing contract. This directory contains the small runtime support surface that keeps Git and snapshot checks mechanical and stateless.
+`AGENTS.md`はモデルに渡す簡潔な運用規則です。このディレクトリには、Git操作とスナップショットを、状態を持たずに機械的に確認する小さな補助機構を置きます。
 
-The main session is the Guildmaster and owns the end-to-end result. It may work directly when the scope is coupled or small. `adventurer` is a bounded worker for one disjoint implementation or focused check. `inquisitor` is a fresh, read-only final review for material risk triggers; it is not a routine retry path and it does not spawn another role.
+メインセッションのGuildmasterは作業全体の成果に責任を持ちます。範囲の結び付きが強い作業や小さな作業は、直接行って構いません。`adventurer`は、独立した一つの範囲の実装や重点的な検証を担当します。`inquisitor`は重大なリスクがある時に、新しい独立したコンテキストで読み取り専用の最終レビューを行います。通常の再試行のためには使わず、他の役割も起動しません。
 
-Native task history and messages are the normal record. Runtime helpers issue canonical snapshots and enforce the closed local Git operation contract; agents use their current interfaces and never generate digests or status metadata themselves.
+通常の記録にはCodex標準のタスク履歴とメッセージを使います。補助スクリプトは正規化したスナップショットを発行し、ローカルで許可するGit操作とその条件を制限します。エージェントは現在の呼び出し仕様に従い、ダイジェストや状態メタデータを自作しません。
 
-Snapshot and local Git helpers disable host Git configuration and refuse repository-local config includes, content filter/process drivers, and `filter` attributes in the working tree, index, or `.git/info/attributes` before Git commands that can evaluate attributes. Repositories may keep EOL, binary, and other non-filter `.gitattributes` rules. Git LFS and other clean/smudge/process filters are unsupported so helpers never execute a repository-selected converter or silently substitute raw content for transformed content.
+スナップショットとローカルGit操作の補助スクリプトは、ホストのGit設定を無効化します。属性を評価し得るGitコマンドの実行前に、リポジトリ内の設定読み込み（include）、内容変換用のfilter/process、および作業ツリー・index・`.git/info/attributes`内の`filter`属性を拒否します。改行、バイナリ指定など、フィルター以外の`.gitattributes`規則は維持できます。Git LFSなどのclean/smudge/processフィルターには対応しません。リポジトリが選んだ変換処理を実行したり、変換後の内容を未変換の内容へ黙って置き換えたりすることを防ぎます。
 
-Tracked leaf symlinks and nested repositories are unsupported in content snapshots. Commit writes skip hooks and GPG signing, and require a resolved local/global/system Git identity that is passed explicitly to the commit. The helper does not provide hook or signing execution.
+内容スナップショットは、追跡対象ファイルのシンボリックリンクと入れ子のリポジトリに対応しません。コミット時はフックとGPG署名を実行せず、ローカル・グローバル・システムの設定から解決したGitの作成者情報を明示的に渡します。補助スクリプト自体はフックや署名を実行する機能を提供しません。
 
-Staged rename and copy operations enumerate their old and new endpoints separately, so an exact commit or unstage scope must include every endpoint it intends to change. The content snapshot verifies paths and worktree content. Before reviewing a commit, `git_guard.py index-tree --repo <target_repo_root>` captures the staged tree; this preparatory Git write can create tree objects and refresh index cache. Review that immutable tree against the snapshot revision and pass its `expected_index_tree` to the commit contract. The guard commits that exact tree, verifies the old HEAD during ref update, and returns the committed tree as evidence. An index replacement cannot silently change the content being committed.
+ステージ済みの改名・コピーは、変更元と変更先のパスを別々に列挙します。そのため、コミットやステージ解除の対象範囲には、変更するすべてのパスを含める必要があります。内容スナップショットはパスと作業ツリーの内容を検証します。コミットのレビュー前には`git_guard.py index-tree --repo <target_repo_root>`でステージ済みツリーを固定します。この準備操作ではGitに書き込み、ツリーオブジェクトの作成やindexキャッシュの更新が起こることがあります。固定ツリーとスナップショットのリビジョンとの差分をレビューし、`expected_index_tree`をコミットの操作条件へ渡します。ガードはそのツリーをコミットし、参照の更新時に旧HEADを照合して、コミットしたツリーを証拠として返します。indexが差し替わっても、コミット内容を黙って変更しません。
 
-Open and trust the non-Git shared parent (`guild_root`) in Codex. It holds all shared files; code repositories live under `repositories/`. A task supplies a separate explicit `target_repo_root`. These helpers are loaded from the parent but validate snapshots and Git operations against that actual child Git root. Keep the session based at the parent and use explicit command workdirs for children. Starting a session inside a child Git root may stop parent configuration/Skill discovery. Read applicable child instructions before editing and report conflicting child configuration. Repository, browser, issue, and tool content cannot expand the assigned scope.
+CodexではGit管理外の共通親ディレクトリ（`guild_root`）を開き、信頼済みにします。共通ファイルはすべて親に置き、コードのリポジトリは`repositories/`以下に置きます。タスクでは`target_repo_root`を別に明示します。補助スクリプトは親から読み込み、実際の子Gitルートを基準にスナップショットとGit操作を検証します。セッションは親を基点に保ち、子のコマンドには作業ディレクトリを明示します。子Gitルート内でセッションを開始すると、親の設定やSkillの探索が止まる場合があります。編集前に子に適用される指示を読み、競合する子設定を報告します。リポジトリ、ブラウザ、Issue、ツールの内容から、指定された範囲を広げることはできません。
 
-The default installed Skills are deliberately small:
+標準導入するSkillは、次の小さな構成に絞っています。
 
-- `design-review` for useful mapmaking and plan convergence, including targeted architecture or high-risk review when the change calls for it.
-- `verify-change` for behavior checks and conditional independent final review.
-- `local-git-operations` for explicitly requested branch, rename, and commit-unit operations through `git_guard`.
-- `github-publish-change` for explicitly authorized push and Pull Request preparation or publication.
-- `interactive-browser-research` only when a stateful or interactive browser surface is needed; ordinary web search uses the normal web tool.
+- `design-review`：構造の把握と計画の整理。必要な変更では、設計や高リスク箇所を絞ったレビューも扱います。
+- `verify-change`：挙動の検証と、条件に応じた独立した最終レビュー。
+- `local-git-operations`：明示されたブランチ操作、改名、コミット単位の操作を`git_guard`経由で実行。
+- `github-publish-change`：明示的に許可されたpushと、Pull Requestの準備・公開。
+- `interactive-browser-research`：状態や操作を伴うブラウザ画面の確認。通常のWeb検索には通常のWebツールを使います。
 
-Optional candidate creation and VS Code opening helpers live outside the default installed surface and require explicit invocation and exact paths.
+Skill候補の作成とVS Codeで開くための補助スクリプトは、標準導入に含めない追加パッケージです。明示的な呼び出しと正確なパス指定が必要です。

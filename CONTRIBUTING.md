@@ -4,14 +4,14 @@ agent-guild-orchestraへの関心と協力に感謝します。小さな修正�
 
 ## ライセンスと権利
 
-本プロジェクトへ提出されたContributionは、別途明示的に合意しない限り、本プロジェクトと同じMIT Licenseで提供されます（inbound = outbound）。Contributionを提出することで、提出者は次を表明します。
+本プロジェクトへ提出された貢献は、別途明示的に合意しない限り、本プロジェクトと同じMIT Licenseで提供されます（受け入れ時と配布時のライセンスを統一）。貢献を提出することで、提出者は次を表明します。
 
 - 自分で作成した、または提出する権限を正当に有する内容であること
 - 雇用契約、委託契約、第三者の権利その他の義務に反しないこと
 - 第三者コードを含む場合、その出典、ライセンス、変更点を明示し、本プロジェクトで再配布できること
-- secret、token、認証情報、個人情報、非公開情報を含めていないこと
+- 機密情報、トークン、認証情報、個人情報、非公開情報を含めていないこと
 
-提出されたContributionの著作権は、提出者または正当な権利者に残ります。このガイドはContributor License Agreementではなく、提出者の権利を譲渡させるものではありません。
+提出された貢献の著作権は、提出者または正当な権利者に残ります。このガイドは貢献者ライセンス契約（Contributor License Agreement）ではなく、提出者の権利を譲渡させるものではありません。
 
 ## Issueを作成する前に
 
@@ -22,7 +22,7 @@ agent-guild-orchestraへの関心と協力に感謝します。小さな修正�
 
 ## 開発と検証
 
-必要な前提条件は[README](README.md#前提条件)を参照してください。変更後は、リポジトリが提供する検証経路を実行します。
+必要な前提条件は[README](README.md#前提)を参照してください。変更後は、リポジトリが提供する検証経路を実行します。
 
 ```bash
 make validate
@@ -37,23 +37,29 @@ make install-dry-run
 
 検証を実行できなかった場合は、Pull Requestに理由と未確認リスクを記載してください。失敗した検証を省略して成功扱いにしないでください。
 
+## 文書とプロンプトの言語
+
+`AGENTS.md`、ロールの指示、Skill本文・参照手順・画面に表示する説明、評価用プロンプト、運用文書は日本語で記述します。Skillの`display_name`は英語で構いません。設定キー、モデル名、Skill名、コマンド、パス、JSONの識別子は元の表記を保ちます。翻訳では役割、権限、受け入れ条件、設定値を変えないでください。
+
+移行判定に使う過去の配布物やハッシュ、ライセンス原文、外部仕様の識別子は原形を保持します。
+
 ## Pull Request
 
-- 誰でもIssueやPull Requestで変更を提案できます。`main`へ直接pushせず、必ずbranchからPull Requestを作成してください。
+- 誰でもIssueやPull Requestで変更を提案できます。`main`へ直接pushせず、必ずブランチからPull Requestを作成してください。
 - 一つのPull Requestには、独立して説明・検証できる一つの目的を持たせてください。
-- 既存の利用者変更を不要に上書きせず、目的外の整形やrenameを混ぜないでください。
+- 既存の利用者変更を不要に上書きせず、目的外の整形や改名を混ぜないでください。
 - 変更内容、理由、検証結果、互換性への影響、残リスクを記載してください。
 - ユーザー向け変更は必要に応じて`README.md`、関連文書、`CHANGELOG.md`も更新してください。
 - 依存関係を追加または更新する場合は、必要性、ライセンス、供給網リスクを説明してください。
 
-maintainerは、品質、安全性、scope、権利関係を確認し、修正や追加検証を依頼することがあります。
+保守担当者は、品質、安全性、対象範囲、権利関係を確認し、修正や追加検証を依頼することがあります。
 
-## Reviewとmerge
+## レビューとマージ
 
-merge要件を満たす承認として扱うのは、対象リポジトリにwriteまたはadmin権限を持ち、かつ[CODEOWNERS](.github/CODEOWNERS)に指定されたreviewerの承認だけです。Pull Request作成者は自分のPull Requestを自己承認できません。作成者自身がwrite・admin権限を持つCODEOWNERであっても、別の適格なCODEOWNERによる承認が必要です。
+マージ要件を満たす承認として扱うのは、対象リポジトリにwriteまたはadmin権限を持ち、かつ[CODEOWNERS](.github/CODEOWNERS)に指定されたレビュー担当者の承認だけです。Pull Request作成者は自分のPull Requestを自己承認できません。作成者自身がwrite・admin権限を持つCODEOWNERであっても、別の適格なCODEOWNERによる承認が必要です。
 
-現在のCODEOWNERは`@nir-nmttg`一名だけです。そのため、本人が作成したPull Requestにも承認を必須とするno-bypassのstrict運用を行うには、別のwriteまたはadmin権限を持つCODEOWNERを追加する必要があります。
+現在のCODEOWNERは`@nir-nmttg`一名だけです。そのため、本人が作成したPull Requestにも承認を必須とし、例外による回避を許さない厳格な運用を行うには、別のwriteまたはadmin権限を持つCODEOWNERを追加する必要があります。
 
-この運用はCODEOWNERSファイルだけでは強制されません。maintainerはGitHubの`main` branch protectionまたはrulesetで、Pull Request、必要なCI、CODEOWNER review、古い承認の扱いなどを設定してください。
+この運用はCODEOWNERSファイルだけでは強制されません。保守担当者はGitHubの`main`のブランチ保護またはルールセットで、Pull Request、必要なCI、CODEOWNERによるレビュー、古い承認の扱いなどを設定してください。
 
-単独maintainerで、repository recoveryや緊急のsecurity対応のためにowner・adminのbypassを残す場合も、通常のmergeには使用しません。やむを得ずbypassした場合は、理由、検証結果、残リスクをPull Requestまたは追跡可能な記録へ残してください。
+保守担当者が一人で、リポジトリ復旧や緊急のセキュリティ対応のためにowner・adminによる例外的な回避手段を残す場合も、通常のマージには使用しません。やむを得ず回避した場合は、理由、検証結果、残リスクをPull Requestまたは追跡可能な記録へ残してください。

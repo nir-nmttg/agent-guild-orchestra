@@ -1,41 +1,41 @@
 ---
 name: local-git-operations
-description: "明示された対象と範囲でbranch作成・未push branch rename・差分のcommit分割を扱うSkill。pushやPR公開は扱いません。"
+description: "明示された対象と範囲でブランチ作成・未pushブランチの改名・差分のコミット分割を扱うSkill。pushやPR公開は扱いません。"
 metadata:
   owner: agent-guild-orchestra
   scope: local-git
 ---
 
-# local-git-operations
+# ローカルのGit操作
 
-ユーザーまたはRootが明示したlocal Git操作だけを、target、ref、path、ownerが確認できる範囲で行います。Git writeの前には[`git_guard`](references/git_guard.md)を読み、操作ごとのreferenceを一つだけ追加で読みます。
+ユーザーまたはGuildmasterが明示したローカルのGit操作だけを、対象、参照、パス、担当者が確認できる範囲で行います。Git書き込みの前には[Git guardの使い方](references/git_guard.md)を読み、操作ごとの参照文書を一つだけ追加で読みます。
 
 ## 使う時
 
-- branch作成・切替は[`create_branch`](references/create_branch.md)
-- origin未pushと確認できるbranch renameは[`rename_branch`](references/rename_branch.md)
-- 明示された差分のcommit分割は[`split_commits`](references/split_commits.md)
-- 既存branch、差分、履歴のread-only確認
+- ブランチ作成・切替は[ブランチの作成](references/create_branch.md)
+- originへ未pushと確認できるブランチの改名は[ブランチの改名](references/rename_branch.md)
+- 明示された差分のコミット分割は[コミットの分割](references/split_commits.md)
+- 既存ブランチ、差分、履歴の読み取り専用の確認
 
 ## 使わない時
 
-push、Pull Request、merge、release、deployなどの公開は`github-publish-change`へ戻します。操作、target、ref、path、owner、承認範囲が不明な時は止めます。
+push、Pull Request、マージ、リリース、デプロイなどの公開は`github-publish-change`へ戻します。操作、対象、参照、パス、担当者、承認範囲が不明な時は止めます。
 
 ## 手順
 
-1. 設定を置く非Git親の`guild_root`と、操作対象の実Git root `target_repo_root`を分ける。helperは親の`.agents/orchestra/scripts/`から読み、Git引数には子の実Git rootを渡す。operation、current/base/new ref、path/hunk、許可された副作用を固定し、status、detached HEAD、保護branch、staged/unstaged/untracked、upstreamをread-onlyで確認する。
-2. writeの時だけsnapshotを作り、`git_guard`へexplicit operation、scope、preconditionとともに渡す。explorationだけではsnapshotを作らない。
-3. referenceのclosed allowlistだけを実行し、対象やscopeが変わったら止めて再契約する。
-4. commit準備でhelperから`expected_index_tree`を取得し、その固定treeとsnapshotのrevisionとの差分を確認する。確認したOIDをcommit contractへ渡し、差し替えられていたら停止する。`working_tree_content`だけをstaged内容の証明にしない。write後にstatus、ref、commit tree、helperのpostcondition snapshotを確認する。通常のstage/commitだけで追加のmodel reviewは要求しない。
+1. 設定を置くGit管理外の親`guild_root`と、操作対象の実Gitルート`target_repo_root`を分ける。補助スクリプトは親の`.agents/orchestra/scripts/`から読み、Git引数には子の実Gitルートを渡す。操作、現在・基点・新規の参照、パス・差分箇所、許可された副作用を固定し、状態、detached HEAD、保護ブランチ、ステージ済み・未ステージ・未追跡の変更、上流ブランチを読み取り専用で確認する。
+2. 書き込みの時だけスナップショットを作り、`git_guard`へ明示的な操作、範囲、事前条件とともに渡す。調査だけではスナップショットを作らない。
+3. 参照文書の許可一覧にある操作だけを実行し、対象や範囲が変わったら停止して操作条件を確認し直す。
+4. コミット準備で補助スクリプトから`expected_index_tree`を取得し、その固定ツリーとスナップショットのリビジョンとの差分を確認する。確認したOIDをコミットの操作条件へ渡し、差し替えられていたら停止する。`working_tree_content`だけをステージ内容の証明にしない。書き込み後に状態、参照、コミットのツリー、補助スクリプトの事後スナップショットを確認する。通常のステージ・コミットだけでモデルによる追加レビューは要求しない。
 
 ## 出力
 
-target、operation、ref/path scope、owner、pre/post snapshot、実行結果、未実行確認と理由、残るrisk。
+対象、操作、参照・パスの範囲、担当者、事前・事後のスナップショット、実行結果、未実行の確認と理由、残るリスク。
 
 ## 安全
 
-`git_guard`の拒否、snapshot mismatch、対象不一致、ownership不明を迂回しません。reset、restore、checkoutで変更を破棄する操作、clean、amend、rebase、ref削除・force move、破壊的stash、external updateはこのSkillで行いません。secrets、credentials、tokens、passwords、keys、auth data、PIIを扱いません。
+`git_guard`の拒否、スナップショットの不一致、対象の不一致、担当者の不明を迂回しません。reset、restore、checkoutで変更を破棄する操作、clean、amend、rebase、参照の削除・強制移動、破壊的なstash、外部更新はこのSkillで行いません。機密情報、認証情報、トークン、パスワード、鍵、認証データ、個人情報を扱いません。
 
 ## 停止条件
 
-許可された操作とpre/post evidenceが完了した時、またはtarget、owner、snapshot、ref/path、承認、allowlistのいずれかを確認できない時。
+許可された操作と事前・事後の証拠確認が完了した時、または対象、担当者、スナップショット、参照・パス、承認、許可一覧のいずれかを確認できない時。

@@ -1,12 +1,12 @@
-# create branch
+# ブランチの作成
 
-新規branch作成は、ユーザーが作成を明示した時だけ行います。対象Git root、base ref、new ref、引き継ぐ既存変更、pre/post conditionsを先に固定します。
+新規ブランチの作成は、ユーザーが作成を明示した時だけ行います。対象Gitルート、基点の参照、新しい参照、引き継ぐ既存変更、事前・事後の条件を先に固定します。
 
-read-onlyで現在ref、status、detached/merge/rebase状態、base存在、local/remoteの同名ref衝突を確認します。未コミット変更の由来が今回の依頼と結び付かない場合は引き継がず停止します。
+読み取り専用で現在の参照、状態、detached HEAD・merge・rebaseの状態、基点の存在、ローカル・リモートの同名参照との衝突を確認します。未コミット変更の由来が今回の依頼と結び付かない場合は引き継がず停止します。
 
-new refは目的を表す短いASCII名にし、secret、PII、長文チケット、内部URLを含めません。`git_guard` preflightとsnapshotが一致した時だけ新規refの作成・切替を行い、既存refへの上書き、force、discarding switchは使いません。作成後はcurrent ref、status、post-snapshotを報告します。
+新しい参照は目的を表す短いASCII名にし、機密情報、個人情報、長文チケット、内部URLを含めません。`git_guard`の事前確認とスナップショットが一致した時だけ新規参照の作成・切替を行い、既存参照への上書き、強制操作、変更を破棄する切替は使いません。作成後は現在の参照、状態、事後スナップショットを報告します。
 
-この配布のhelperでclean rootからbranchを作る最小例です。`subject_snapshot`はhelper出力全体をそのまま使い、hashを記入しません。
+この配布の補助スクリプトで、変更のないGitルートからブランチを作る最小例です。`subject_snapshot`には補助スクリプトの出力全体をそのまま使い、ハッシュを手で記入しません。
 
 ```python
 import json, pathlib, subprocess, tempfile

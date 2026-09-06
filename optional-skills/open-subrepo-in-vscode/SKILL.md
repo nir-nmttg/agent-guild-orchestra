@@ -1,38 +1,38 @@
 ---
 name: open-subrepo-in-vscode
-description: "明示された一つのworkspace directoryをVS Codeの新規windowで開く要求だけを扱います。"
+description: "明示された1つのワークスペースディレクトリを VS Code の新規ウィンドウで開く要求だけを扱います。"
 metadata:
   owner: agent-guild-orchestra
   scope: optional-vscode-launch
 ---
 
-# open-subrepo-in-vscode
+# VS Code でディレクトリを開く
 
-ユーザーが明示した一つのabsolute directoryを、read-only表示目的でVS Codeの新規windowへ開きます。明示 invocation専用で、folder内のrepo操作や設定変更はしません。
+ユーザーが明示した1つの絶対パスのディレクトリを、読み取り専用の表示目的で VS Code の新規ウィンドウに開きます。明示的な呼び出し専用で、フォルダー内のリポジトリ操作や設定変更はしません。
 
 ## 使う時
 
-- exact absolute directory、起動目的、read-only表示範囲が明示された時
+- 正確に指定された絶対パスのディレクトリ、起動目的、読み取り専用の表示範囲が明示された時
 
 ## 使わない時
 
-directory、launcher、目的、承認範囲が曖昧な時、個別file・既存window・workspace設定・extension・Git/build/testが目的の時、launcher identityやvisual confirmationを確認できない時。
+ディレクトリ、起動プログラム、目的、承認範囲が曖昧な時、個別ファイル・既存ウィンドウ・ワークスペース設定・拡張機能・Git/ビルド/テストが目的の時、起動プログラムの識別情報や目視確認を確認できない時。
 
 ## 手順
 
-1. `scripts/open_directory_in_vscode.py --plan --directory <absolute-directory>`でcanonical target、trusted launcher、`-n` argv、plan_idを作る。planでは起動しない。
-2. target、launcher、argvを表示してruntime GUI approvalを得る。approval、identity、targetが変われば止める。
-3. 同じdirectoryへ`--execute --approved-plan-id <plan_id>`を渡す。helperが実行直前に再計画し、identity mismatchでは起動しない。
-4. exit 0はlaunch request acceptedだけとして、visual confirmationなしに開いたとは報告しない。
+1. `scripts/open_directory_in_vscode.py --plan --directory <absolute-directory>`で正規化した対象、信頼済みの起動プログラム、`-n` の引数、`plan_id`を作成する。計画段階では起動しない。
+2. 対象、起動プログラム、引数を表示して、実行環境の GUI 承認を得る。承認、識別情報、対象が変われば止める。
+3. 同じディレクトリに `--execute --approved-plan-id <plan_id>`を渡す。補助スクリプトが実行直前に再計画し、識別情報が一致しない場合は起動しない。
+4. 終了コード `0` は起動要求を受け付けたことだけを示すため、目視確認なしに開いたとは報告しない。
 
 ## 出力
 
-canonical target、launcher identity、argv、plan_id、status、launch state、exit code、visual confirmation、失敗理由。
+正規化した対象、起動プログラムの識別情報、引数、`plan_id`、状態、起動状態、終了コード、目視確認、失敗理由。
 
 ## 安全
 
-target以外を読み書きせず、symlink・relative path・missing directory・untrusted launcherを拒否します。secrets、credentials、tokens、passwords、keys、auth data、PII、file contentsを扱いません。shell interpolation、`open -a`、runtime approval迂回、外部アプリの別操作をしません。
+対象以外を読み書きせず、シンボリックリンク・相対パス・存在しないディレクトリ・信頼できない起動プログラムを拒否します。秘密情報、認証情報、トークン、パスワード、鍵、認証データ、個人情報、ファイル内容を扱いません。シェル展開、`open -a`、実行環境の承認の迂回、外部アプリでの別操作をしません。
 
 ## 停止条件
 
-launch request acceptedをvisual confirmation unknownのまま正確に返せた時、または入力不正、approval不足、identity mismatch、launcher不在、nonzero exit、scope拡張が判明した時。
+目視確認が不明なまま、起動要求を受け付けたことを正確に返せた時、または入力不正、承認不足、識別情報の不一致、起動プログラム不在、0以外の終了コード、対象範囲の拡張が判明した時。

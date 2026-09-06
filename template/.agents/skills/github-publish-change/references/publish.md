@@ -1,5 +1,5 @@
-# publish
+# 公開手順
 
-公開前に、次の値を一つのexact scopeとして再確認します: target repository、remote、head/base ref、pushするcommit range、PR title/body、draft/ready、公開操作。ユーザーの以前のauthorizationを使う場合も、これらが同じであることを確認し、scope変更があれば再確認へ戻ります。
+公開前に、対象リポジトリ、リモート、変更元・取り込み先の参照（head/base）、pushするコミット範囲、PRタイトル・本文、下書き・公開準備済みの状態、公開操作を、一つの正確な範囲として再確認します。ユーザーから既に得ている許可を使う場合も、これらが同じであることを確認し、範囲が変わっていれば再確認へ戻ります。
 
-承認済みの範囲だけを一度実行します。force push、tags/all branches、remote追加、branch削除、merge、release、deploy、PR本文への推測追加は行いません。push成功後にPR作成が失敗しても、追加pushや削除で回復しません。外部結果、URL、ref、commit range、失敗理由を報告して停止します。
+承認済みの範囲だけを一度実行します。force push、タグ・全ブランチのpush、リモート追加、ブランチ削除、マージ、リリース、デプロイ、PR本文への推測追加は行いません。push成功後にPR作成が失敗しても、追加のpushや削除で回復しません。外部操作の結果、URL、参照、コミット範囲、失敗理由を報告して停止します。
