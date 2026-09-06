@@ -1,202 +1,136 @@
-<img src="docs/assets/agent-guild-orchestra-social-preview.png" alt="Agent Guild Orchestraのソーシャルプレビュー">
-
----
+<img src="docs/assets/agent-guild-orchestra-social-preview.png" alt="Agent Guild Orchestra">
 
 # Agent Guild Orchestra
 
-Codexを、成果品質、安全な権限境界、検証可能性を優先して動かすためのGuild runtimeテンプレートです。実作業のリポジトリとオーケストレーション用の契約・状態を分離し、作業の大きさとリスクに応じた委譲、検証、監査を支援します。
-
-現在のバージョンは`2.4.0`です。
+Agent Guild Orchestra 3.0.0は、Codexのプロジェクト固有設定、二つのカスタムエージェント、五つのSkill、安全確認用の小さな補助スクリプトを非Gitの親ディレクトリへ配布するテンプレートです。常駐サービスや独自スケジューラーはありません。Codex自身の会話履歴、サブエージェント、メッセージ、承認を使います。
 
 > [!IMPORTANT]
-> このプロジェクトは独立したコミュニティプロジェクトであり、OpenAIによる公式提供、提携、支援、承認を受けたものではありません。Codex、GPTおよびOpenAIはOpenAIの商標または登録商標です。本プロジェクトはOpenAIのロゴを使用しません。
+> このプロジェクトは独立したコミュニティプロジェクトであり、OpenAIによる公式提供、提携、支援、承認を受けたものではありません。
 
-## まず知っておくこと
+## 動作の概要
 
-導入先は、実作業リポジトリそのものではなく、それらをまとめる専用のGuild rootです。
+Rootはgpt-6-astraで動き、推論レベルはプロジェクトで固定せず、利用者がタスク/セッションで選んだ対応値に従います。Rootは小さな作業を直接完了でき、分離する価値がある実装をAdventurerへ渡します。Adventurerはgpt-5.6-luna / maxです。セキュリティ、インストーラーやGit安全契約の変更、移行、互換性などの重大なリスクは、実装者から独立した読み取り専用のInquisitor（Astra / xhigh）が確認します。通常のローカルでのブランチ/ステージ/コミットだけでは追加のモデルレビューを要求しません。
 
-```text
-<guild-root>/
-├── AGENTS.md
-├── .agents/
-├── .codex/
-├── .orchestra/
-└── repositories/
-    ├── app-a/
-    └── app-b/
-```
+カスタムエージェントはAdventurerとInquisitorだけです。旧版の10ロール、Quest / Party / Guild、ランク、SQLiteキュー、受信箱、Ledger、ダッシュボード、Stop hook、二重設定は3.0.0にありません。
 
-各作業の対象となる`target_repo_root`は、`repositories/`直下にある個別リポジトリのGit rootへ固定します。インストーラーは`repositories/`配下の実作業リポジトリを移動・削除しません。
-
-## 前提条件
+## 前提
 
 - Git
-- Docker EngineまたはDocker Desktop（`docker build`と`docker run`を実行できること）
-- Codexのproject-local設定とcustom agentを利用できる環境
-- Docker imageの初回build時に、base imageとPython依存関係を取得できるネットワーク
+- Bashと、起動済みのDocker DesktopまたはローカルDocker Engine
+- プロジェクト固有のカスタムエージェントを利用できるCodex
 
-通常の検証と導入でホストへPythonパッケージを直接インストールする必要はありません。`make validate`と`./scripts/docker_python.sh`は、requirementsを含むDocker image内のPythonで実行されます。hostで直接`python3`を使うのは任意の運用であり、Python 3.10以上かつ`requirements.txt`の依存関係（Python 3.10では`tomli`を含む）を満たす場合だけにしてください。
+導入・更新と`make validate`はDocker内のPython 3.12とGitを使い、ホストのPythonの有無やバージョンに依存しません。初回は公式Pythonイメージを取得して検証用イメージをビルドするためネットワーク接続が必要です。以後はビルドキャッシュを再利用します。macOS/Linux（WindowsはWSL2）で、導入先をbind mountできるローカルDockerを使用してください。
 
-## 初回導入
+配布元は読み取り専用、導入先の親だけを更新可能にし、`repositories/`は読み取り専用でマウントします。`--dry-run`では親も読み取り専用です。生成ファイルは呼び出した利用者のUID/GIDで作成され、コンテナは処理後に削除されます。Dockerは導入処理専用です。導入後のCodexタスクはホストで動き、ステートレスなGit補助スクリプトはその実行環境のPythonとGitを使います。
 
-### 1. cloneして配布物を検証する
+## 配置と導入
 
-```bash
+既存の非Git親ディレクトリを指定します。Gitの作業ツリー内のディレクトリは導入先にできません。
+
+```text
+asked-root/                         ← 設定の導入先・Codexの起動場所
+├── AGENTS.md
+├── .codex/                         ← config.toml・名前付きエージェント
+├── .agents/                        ← Skills・補助スクリプト・導入マニフェスト
+└── repositories/
+    ├── asked_backend/              ← 実Gitルート
+    ├── asked_compose/              ← 実Gitルート
+    └── asked_frontend/             ← 実Gitルート
+```
+
+~~~bash
 git clone https://github.com/nir-nmttg/agent-guild-orchestra.git
 cd agent-guild-orchestra
 make validate
-```
 
-`make validate`は、安全境界、role・model設定、queue・snapshot契約、最終成果のhard gate、日本語化方針など、リポジトリが提供する一連のvalidatorを実行します。
+./scripts/install.sh --target /Users/nir-nmttg/Projects/achromono/asked-root --dry-run
+./scripts/install.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
+~~~
 
-### 2. 実際の導入先に対してdry-runする
+子リポジトリへAGENTS.md、.codex、.agents、マニフェストを追加しません。子の既存ファイル、Git index、Git設定、.gitignore、.git/info/excludeも変更しません。設定の配置場所を示す`guild_root`と、コード変更・Git操作の`target_repo_root`を分けます。
 
-```bash
-./scripts/install.sh \
-  --target /path/to/guild-root \
-  --mode copy \
-  --dry-run
-```
+親のAGENTS.mdはマーカー内の管理ブロックだけを更新します。その他の配布物の導入時ハッシュと所有権は、親の`.agents/orchestra/install-manifest.json`（スキーマ 2 / `layout: guild-parent`）へ記録します。
 
-出力された作成・更新対象を確認してください。導入先には、子リポジトリや`repositories/`自体ではなく、その親となるGuild rootを指定します。
+新規設定と未変更の旧配布設定は管理対象になります。既存の独自`.codex/config.toml`は既定でユーザー管理の設定として内容・権限を保持し、JSONの`next_steps`に必要設定を出力します。ユーザー設定の自動統合は行いません。必要に応じて`--config-mode managed|user-owned`で指定できますが、管理対象への切替でも独自設定は上書きせず衝突として停止します。
 
-### 3. バックアップ付きで導入する
+## Codexでの起動
 
-```bash
-./scripts/install.sh \
-  --target /path/to/guild-root \
-  --mode copy \
-  --backup
-```
+**Codexで非Git親のasked-rootを開いて信頼し、その親を作業場所とする新しいローカルタスクを開始してください。** CLIの場合は次の形です。
 
-既存の管理対象がある場合、変更前の状態は`<guild-root>/.agent-guild-orchestra-backups/<timestamp>/`へコピーされます。新規の空ディレクトリへ導入する場合は、バックアップ対象がないためbackupは作成されません。
+~~~bash
+codex --cd /Users/nir-nmttg/Projects/achromono/asked-root
+~~~
 
-導入後、実作業リポジトリを`<guild-root>/repositories/<repo>`へ配置します。
+依頼には「`repositories/asked_backend`の実Gitルートを対象に変更」のように対象を明示します。セッションの基点は親に保ち、子でのコマンドは作業ディレクトリや`git -C`で指定します。子Gitルートを直接開くと親の設定・Skill探索がGit境界で止まるため、この構成の起動方法にはしません。
 
-## 通常の更新
+独自設定を保持した場合は、Astraモデル、1Mコンテキスト、エージェントの有効化と同時実行上限2、`multi_agent`、実験的コンテキスト管理の設定を手動で整合させます。Guildmasterの推論レベルは利用者がタスク/セッションで選びます。子のAGENTS指示はコード変更前に読み、既存の子設定・Skill・名前付きエージェントとの競合を確認します。インストーラーは該当パスを`child_overrides`へ表示し、子設定を自動統合しません。
 
-配布元リポジトリを更新し、`sync.sh`で既存環境へ反映します。`sync.sh`は更新前のバックアップを自動で有効にします。
+Codex 0.153.3で親の有効設定、AGENTS.md、五つのSkillの読み込みと子設定との分離を確認しました。名前付きエージェントの実機確認は最初のターンが45秒の上限に達し、実際の呼び出しと子の実行時権限は未確認です。再実行用スクリプト・設定継承の範囲・制約は[親配置の設計と検証](docs/parent-layout.md)に記載しています。ファイル配置の成功だけでは有効化完了を意味しません。
 
-```bash
-cd /path/to/agent-guild-orchestra
+## 更新
+
+~~~bash
 git pull --ff-only
 make validate
-./scripts/sync.sh --target /path/to/guild-root --dry-run
-./scripts/sync.sh --target /path/to/guild-root
-```
+./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root --dry-run
+./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
+~~~
 
-通常更新では、既存の`.orchestra/queue/`、Ledger、dashboardを保持しながら静的な配布物を更新します。互換性のない古いruntime schemaが見つかった場合、インストーラーはfail closedで停止し、状態の初期化方法を案内します。
+配布元だけの変更は更新し、導入先だけの変更は保持します。権限だけの変更もローカル変更として扱い、同じ管理対象ファイルが両方で変わると書き込み前に衝突として停止します。共有AGENTS.mdの既存権限は維持します。候補の事前検証・変更対象のバックアップ・各ファイルのアトミック置換を行い、途中の例外やCtrl-Cでは復元します。復元にも失敗した場合は、親の`.agent-guild-orchestra-recovery/transaction-.../`へバックアップを残し、場所を報告します。シンボリックリンクを経由する管理パスは拒否します。
 
-## 安全なクリーンインストール
+旧親環境も同じ`--target`で更新します。確認できる旧配布ファイルだけを親内へ退避します。以前の子側v3配置の整理は、通常の導入・更新とは別の明示操作です。[移行ガイド](docs/migration-v3.md)を参照してください。
 
-管理対象を配布物の現在状態から作り直す必要がある場合だけ、`clean_install.sh`を使います。これはアンインストーラーではなく、動的状態を含む管理対象を初期化して再導入するコマンドです。必ずdry-runの確認後に、`--backup`付きで実行してください。
+## Skill
 
-```bash
-./scripts/clean_install.sh \
-  --target /path/to/guild-root \
-  --backup \
-  --dry-run
+通常導入には次の五つだけが入ります。
 
-./scripts/clean_install.sh \
-  --target /path/to/guild-root \
-  --backup
-```
+- `design-review`
+- `verify-change`
+- `local-git-operations`
+- `github-publish-change`
+- `interactive-browser-research`
 
-バックアップは削除・初期化より先に作成されます。クリーンインストールによる扱いは次のとおりです。
+保守担当者向けの`orchestra-contract-validation`と`orchestra-runtime-security-audit`、追加用の`create-skill-candidate-from-gap`と`open-subrepo-in-vscode`は既定では含まれません。利用可能なパッケージと区分は次で確認できます。
 
-| 対象 | 扱い |
-| --- | --- |
-| `.agents/orchestra/` | 削除後、現在のtemplateから再作成 |
-| `.agents/skills/` | 本プロジェクトがownerのskillだけを削除後、再作成。他ownerのskillは保持 |
-| `.codex/` | ディレクトリ全体を削除後、再作成。独自設定がある場合はbackupから必要部分を選んで復元 |
-| `.orchestra/` | `skill-candidates/`だけを保持し、他の既存・未知runtime siblingを削除後、queue・Ledger・dashboardを初期状態で再作成 |
-| `AGENTS.md` | 本プロジェクトの管理ブロックだけを除去後、再作成。ブロック外は保持 |
-| `.git/info/exclude` | 本プロジェクトの管理ブロックだけを除去後、再作成。ブロック外は保持 |
-| `repositories/`とその配下 | 保持。移動・削除・backupの対象外 |
+~~~bash
+./scripts/install.sh --list-skills
+./scripts/install.sh --target /absolute/path/to/asked-root \
+  --with-skill create-skill-candidate-from-gap
+~~~
 
-`.orchestra/`の監査履歴や`skill-candidates/`以外の独自runtime artifactが必要な場合、または`.codex/`に独自設定がある場合は、実行前にbackupの保存先と復元方針を確認してください。
+選択済みパッケージは次回更新でも維持されます。外す時は`--without-skill NAME`を使います。
 
-## 変更される範囲とバックアップ
+## 安全境界と補助スクリプト
 
-通常の導入・更新では、指定したGuild rootの次の範囲を作成または更新します。
+`.agents/orchestra/scripts/`には二つの状態を持たない補助スクリプトがあります。
 
-- `AGENTS.md`内の`agent-guild-orchestra`管理ブロック
-- `.agents/orchestra/`と、ownerが本プロジェクトである`.agents/skills/`
-- `.codex/`
-- `.orchestra/`（queue、Ledger、dashboardなどの動的状態）
-- `repositories/`ディレクトリ
-- Gitリポジトリの場合は`.git/info/exclude`内の管理ブロック（`--no-git-exclude`で省略可能）
+- `snapshot_digest.py`: 実際のGitルートとリビジョン / 作業ツリー / コミット範囲の正規スナップショットを発行
+- `git_guard.py`: スナップショット、対象範囲、操作とレビュー済みインデックスツリーを照合して限定されたローカルGit操作を実行し、事後条件スナップショットとコミットツリーを返す
 
-`--backup`は、既存の`AGENTS.md`、`.git/info/exclude`、`.agents/`、`.codex/`、`.orchestra/`をtimestamp付きディレクトリへコピーします。`repositories/`配下は含みません。non-dry-runの`--clean-install`は既定で`--backup`が必須です。復元不要と判断した時だけ、明示的な危険な逃げ道`--allow-clean-install-without-backup`を指定できます。この指定では削除前の証跡を作らず、復元できません。
+補助スクリプトは呼び出し元の身元や権限を証明しません。サンドボックスとCodexの承認が実際の権限境界です。Git対象、対象範囲、操作、事前/事後スナップショットを照合して、古い根拠や別リポジトリへの取り違えを防ぎます。
 
-## 復元とアンインストール
+通常の引き継ぎとチェックポイントはCodex標準のタスク履歴で足ります。明示的な再開境界が必要な場合だけ、秘密情報や生ログを除いたチェックポイントを使います。
 
-自動復元・アンインストールコマンドは現在ありません。復元が必要な場合は、Codexや関連プロセスを停止し、現在の状態も別途保全してから、`.agent-guild-orchestra-backups/<timestamp>/`に保存された各パスを元のGuild rootへ戻してください。backupに存在しない新規作成物は自動では削除されません。
+Gitフックと署名は補助スクリプトのローカル操作ではスキップされます。Git LFSなどの内容変換フィルターを使うリポジトリ、内容変換用の`filter`/`process`設定、追跡対象のリーフシンボリックリンクはスナップショット/Git書き込みの未対応境界です。認証情報らしいファイル名は実装担当の固定判定ルールで読み取り対象から除外されます。
 
-手動で管理対象を除去する場合も、`repositories/`配下には触れないでください。`AGENTS.md`と`.git/info/exclude`ではファイル全体ではなく、本プロジェクトの開始・終了markerで囲まれた管理ブロックだけを除去します。
+[ランタイム設計](docs/orchestration-runtime.md)と[セキュリティモデル](docs/security-model.md)に、委譲判断、独立レビュー、Git操作、外部更新の扱いを記載しています。
 
-## クイック検証
+## 検証
 
-配布元リポジトリの変更後や導入前は、まず次を実行します。
-
-```bash
+~~~bash
 make validate
 make install-dry-run
-```
+~~~
 
-`make install-dry-run`は一時ディレクトリを使って、変更を書き込まずに初回導入経路を確認します。実際のGuild rootに対する変更予定は、`install.sh`、`sync.sh`、`clean_install.sh`の各`--dry-run`で確認してください。
+バリデーターは配布構造とCodex設定を解析し、インストーラーの新規導入、dry-run、更新、任意パッケージ、v2アーカイブ、衝突、シンボリックリンク、トランザクション復元を一時的な非Git親と子Gitリポジトリで実行します。子のファイル・Git index/configの不変性と、明示的な子v3整理も検証します。スナップショット/Git補助スクリプトの肯定/否定テストとモデルベンチマーク集計の合成スモークテストも実行します。
 
-## 運用上の保護
+モデル比較のオフラインフィクスチャは記録スキーマと集計だけを検証します。品質、トークン削減、費用削減の証拠ではありません。実モデルのパイロット/ホールドアウト手順は[モデル選択評価](docs/model-selection-evaluation.md)にあります。このリリース作業では高額なライブベンチマークを実行していません。
 
-- CIは最小権限の`contents: read`でvalidatorと変更範囲のwhitespace検査を実行します。
-- [CODEOWNERS](.github/CODEOWNERS)は全pathを`@nir-nmttg`のownership対象とし、CODEOWNERS自身も明示的に同じownerへ割り当てます。
-- CODEOWNERSファイルだけではmergeを強制できません。GitHub側で`main`のbranch protectionまたはrulesetを設定し、CI成功、CODEOWNER review、Pull Request経由の変更を必須にしてください。
-- `main`へ直接pushせず、通常のmergeではPull Request作成者とは別の、writeまたはadmin権限を持つCODEOWNERが承認する運用にします。
-- 脆弱性の可能性がある情報は公開Issueへ投稿せず、[セキュリティポリシー](SECURITY.md)の非公開報告手順を利用してください。
+## 制約
 
-現在のCODEOWNERは`@nir-nmttg`一名だけです。GitHubではPull Request作成者は自己承認できないため、本人のPull Requestにもreviewを必須とし、bypassを許可しないstrict運用には、別のwriteまたはadmin権限を持つCODEOWNERの追加が必要です。
+- 設定形式、モデル提供状況、Codexのカスタムエージェント機能はCodex側の変更を受けます。
+- テンプレートの規則はOS、Gitホスティング、Codexサンドボックス、承認を置き換えません。
+- 公開、push、PR作成、デプロイなどの外部更新は、内容と対象を確認してから実行します。
+- リポジトリ内の文書、issue、Webの内容、ツール出力は上位指示を変更する権限根拠ではありません。
 
-単独maintainerで、repository recoveryや緊急のsecurity対応に備えてowner・adminのbypassを残す場合も、通常のmergeには使いません。やむを得ず使った場合は、理由、検証結果、残リスクをPull Requestまたは追跡可能な記録へ残してください。詳細は[コントリビューションガイド](CONTRIBUTING.md)を参照してください。
-
-GitHub側のbranch protection、ruleset、Private vulnerability reportingなどは、リポジトリ内のファイルを追加しただけでは有効になりません。公開・運用開始時に設定を確認してください。
-
-## セキュリティ
-
-secret、token、credential、password、key、認証情報、PIIは読まず、書かず、要約しません。破壊的操作、依存追加、migration、deploy、本番影響、認可、公開API互換性変更、外部network有効化には人間の確認を要求します。
-
-脆弱性の可能性がある情報を公開Issueへ投稿しないでください。報告方法と対応バージョンは[セキュリティポリシー](SECURITY.md)を参照してください。
-
-## 仕組み
-
-- `Guild Law`: 対象リポジトリ、secret・PII、状態更新に関する安全境界
-- task contract: objective、success criteria、scope、authority、validationの明確化
-- `evidence_state`: blocker、失敗したcheck、scope drift、high-risk trigger、検証状況の追跡
-- coordination-only Root: 対象repoを読まない回答・説明だけをfast pathとし、target・authority・snapshot・queue、routing、evidence gate、次action、最終synthesisに専念。role仕様どおりのbrowser-control tool実行と観測事実記録だけが狭い例外
-- role-based delegation / Trial: 対象repoの探索、コード読解、実装、test、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集をnamed roleへ委譲
-- Root orchestration trace gate: `high / xhigh / ultra`の固定pair、許可edge、target・authority・snapshot refの事前確認、assignmentごとのwait、role phaseと親子report evidence gateの順序、no-direct-fallbackを、10 case × 3 mode の30 deterministic synthetic contract trace（negative/mutation testを含む）で検証。live real-model fan-out matrixは未検証で、synthetic traceはその実証を代替しない
-- `Ledger`: 検証根拠と残リスクを記録するSQLite監査履歴
-- helper-issued snapshotとqueue lineageのfail-closedな検証
-
-数値confidence、固定回数のread・test、全案件共通の長いchecklistには依存しません。RootはSolに固定し、reasoning effortはproject-localへ固定せず、利用者が`high`、`xhigh`、`ultra`から選びます。どのmodeでもRootはnamed top-level assignmentだけを直接作り、唯一のnested edgeとして`inquisitor`からterminal `examiner`への単一focus委譲だけを許可します。作業担当として位置付ける`adventurer`、`sage`、`examiner`はLuna/max、Trialの最終decisionを持つ`inquisitor`はSol/xhighを使います。その他の設計、広い判断、統合、例外診断を持つroleは既存のSol pairを維持します。CourierはLuna/highです。この割り当てはLunaの低コスト特性を活用する明示的な構成選択であり、このリポジトリで新たに取得したlive比較による品質・コストの実証ではありません。
-
-利用例は[ユースケース集](docs/use-cases/README.md)、設計の詳細は[orchestration runtime](docs/orchestration-runtime.md)と[agent deployment](docs/agent-deployment.md)、モデル選択の方針は[モデル選択評価](docs/model-selection-evaluation.md)を参照してください。
-
-## 対応範囲と既知の制約
-
-- 導入modeは現在`copy`のみです。
-- runtime schema v4（`4.0`）を前提とし、canonical schemaのSHA-256とtable / column型 / constraint / index定義をexact照合します。v3以前または物理定義が異なるSQLite stateは暗黙migrationせず拒否するため、必要なstateを保全したうえで`--backup --reset-runtime`または`--backup --clean-install`を行ってください。
-- Docker imageはbuild時に外部registryとPython package indexへ接続します。オフライン環境では事前準備が必要です。
-- Codexやモデルの提供状況、設定形式、利用条件の変更により、role設定の調整が必要になる場合があります。
-- Root orchestrationのlive E2E matrixは未取得です。通常validatorのsynthetic trace self-testは契約実装を検証しますが、実model fan-outの実証を代替しません。
-- 本プロジェクトの安全境界は運用を支援する契約であり、OS、container、GitHubなどのアクセス制御を代替しません。
-- `repositories/`配下のアプリケーション自体の品質、ライセンス、セキュリティは各リポジトリの管理者が確認してください。
-
-## コントリビューションとサポート
-
-IssueやPull Requestを送る前に[コントリビューションガイド](CONTRIBUTING.md)と[行動規範](CODE_OF_CONDUCT.md)を確認してください。利用方法の質問とサポート範囲は[サポート方針](SUPPORT.md)に記載しています。
-
-直接依存関係のライセンスinventoryは[第三者ライセンスに関する通知](THIRD_PARTY_NOTICES.md)を参照してください。
-
-## ライセンス
-
-このプロジェクトは[MIT License](LICENSE)で提供されます。[日本語参考訳](LICENSE.ja.md)も用意していますが、法的効力を持つ条件は英語版の`LICENSE`が優先します。
+コントリビューションは[CONTRIBUTING.md](CONTRIBUTING.md)、脆弱性報告は[SECURITY.md](SECURITY.md)、利用条件は[MIT License](LICENSE)を参照してください。

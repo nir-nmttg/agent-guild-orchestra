@@ -4,7 +4,34 @@
 
 ## [Unreleased]
 
-現在、記録対象の変更はありません。
+- AGENTS.md、ロール指示、Skill本文・参照手順・説明、評価用プロンプト、運用文書を日本語化。Skillの表示名、モデル設定、操作識別子、権限境界は維持
+- 更新・子整理の例外/Ctrl-Cで復元し、復元失敗や再中断ではDocker削除後も親に復旧backupを保持。不要なcandidateの一時disk複製を削除
+- AGENTS.mdの既存権限と管理fileのmode変更を保持し、旧v2の既知の配布modeも区別
+- commitをレビュー済みindex treeへ固定し、同一pathのindex差し替えを検知。Git操作例の不要な宣言項目と固定temporary filenameを整理
+- 未追跡directory内のfileをGit guardが誤って拒否する問題を修正し、指定fileだけをstage/commitする回帰試験を追加
+- Rootのeffort選択とLuna/max指定の説明を分離し、通常のlocal Git操作だけではInquisitorを追加起動しないよう指示を明確化
+- 評価器で品質不合格と実行失敗を区別し、Rootのmodel照合とeffort別集計を追加
+- maintainer用のCodex実機確認scriptを追加。親/子の設定・Skill探索と実spawnを分けて検証し、観測できないmodel/effort/permissionを成功扱いしない
+- 非Git親を標準導入先に戻し、設定rootと実Git rootを分離。子repositoryのfile/index/config/ignore ruleは通常導入・更新で変更しない
+- 親manifestをschema 2にし、旧親の未変更配布物だけをhashで確認して退避。独自設定・変更済みfile・第三者Skillを保持
+- 子側v3からの移行用に、明示された子の未変更・未追跡配布物だけを扱う独立したDocker cleanupを追加
+- 親起動のCodex設定・AGENTS・Skill探索を実測し、Git境界による探索停止とnamed agent実行の未確認範囲を文書化
+
+- `install.sh`、`sync.sh`、`make validate`をDocker内のPython 3.12とGitで実行し、ホストPythonのversion依存を解消
+- Docker launcherの引数・mount検証と、実Dockerによる導入・更新・旧Guild root移行・linked worktreeのsmoke testを追加
+
+## [3.0.0] - 2026-09-05
+
+### Breaking changes
+
+- productをCodex向けの静的template distributionへ再設計し、独自scheduler、SQLite queue、inbox、Ledger、dashboard、rank、Stop hook、二重settingsを削除
+- Rootをgpt-6-astra / highへ変更し、利用者のsession overrideを尊重。Rootの直接作業を許可し、custom agentをLuna/maxのAdventurerとAstra/high read-only Inquisitorだけに縮小
+- targetを任意のexplicit canonical Git rootに変更し、guild_root/repositories directory形状の要件を削除
+- statelessなboundary_guard.py、snapshot_digest.py、git_guard.pyへ安全確認を集約。repository指定content filterを実行せず、結果・review・acceptance checkのevidence参照を実objectへ結合
+- default Skillをdesign-review、verify-change、local-git-operations、github-publish-change、interactive-browser-researchの五つへ整理。maintainer二つとoptional二つは明示選択packageへ分離
+- installerをper-install hash manifest、全path preflight、no-op保持、staged transaction、失敗時restoreへ変更。v2からは--major-upgradeと必要に応じた明示的な--legacy-rootで旧managed runtimeをcold archiveし、import / replayしない
+- 旧role / Skill aliasと旧runtime import compatibilityを削除
+- model評価をAstra-only、Astra+Luna/max、frozen v2.4 baselineのwhole-task accounting protocolへ置換。offline fixtureはschema smokeに限定し、live品質・費用削減を主張しない
 
 ## [2.4.0] - 2026-08-23
 

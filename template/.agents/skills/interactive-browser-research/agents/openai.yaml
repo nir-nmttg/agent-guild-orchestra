@@ -1,0 +1,4 @@
+interface:
+  display_name: "Interactive Browser Research"
+  short_description: "状態を持つブラウザ画面を読み取り専用で確認し、根拠を整理します"
+  default_prompt: "$interactive-browser-research を使い、指定されたブラウザ画面を状態変更なしで調査してください。"

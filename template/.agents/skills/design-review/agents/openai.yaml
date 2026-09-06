@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Review"
+  short_description: "設計と計画を根拠付きの最小十分な実装案へ収束させます"
+  default_prompt: "$design-review を使い、この設計または実装計画を検証可能な最小案へ整えてください。"

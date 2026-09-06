@@ -1,8 +1,0 @@
-services:
-  tools:
-    build:
-      context: .
-    image: agent-guild-orchestra-tools:local
-    working_dir: /workspace
-    volumes:
-      - .:/workspace

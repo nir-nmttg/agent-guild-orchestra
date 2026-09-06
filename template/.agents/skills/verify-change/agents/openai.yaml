@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Change"
+  short_description: "実装の挙動を検証し、必要な時だけ独立レビューします"
+  default_prompt: "$verify-change を使い、この変更の受け入れ条件に対応する検証を実行してください。"

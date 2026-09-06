@@ -28,9 +28,8 @@ build/
 dist/
 *.egg-info/
 
-# Local runtime and backups
-.orchestra/
-.agent-guild-orchestra-backups/
+# Local installer recovery archives
+.agent-guild-orchestra-archives/
 
 # Secrets and local configuration
 .env
