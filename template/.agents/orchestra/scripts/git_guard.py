@@ -57,16 +57,8 @@ FORBIDDEN_OPERATIONS = {
 }
 PROTECTED_BRANCHES = {"main", "master", "develop", "trunk", "production"}
 BRANCH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}\Z")
+TREE_OID_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 MAX_PATCH_BYTES = 8 * 1024 * 1024
-REQUIRED_GUARD_FIELDS = {
-    "target_repo_root",
-    "allowed_operations",
-    "path_or_ref_scope",
-    "subject_snapshot",
-    "preconditions",
-    "postconditions",
-    "forbidden_operations",
-}
 
 
 class GitGuardError(RuntimeError):
@@ -256,7 +248,7 @@ def _status(repo: Path) -> tuple[str, set[str]]:
             "--porcelain=v1",
             "-z",
             "--no-renames",
-            "--untracked-files=normal",
+            "--untracked-files=all",
         ],
     )
     # --no-renames expands a rename/copy into endpoint records. Each NUL
@@ -279,12 +271,82 @@ def _status(repo: Path) -> tuple[str, set[str]]:
 
 
 def _staged_paths(repo: Path) -> set[str]:
-    raw = _git(repo, ["diff", "--cached", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"])
+    raw = _git(
+        repo,
+        [
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--ignore-submodules=none",
+            "--no-ext-diff",
+            "--no-textconv",
+        ],
+    )
     result: set[str] = set()
     for item in raw.split(b"\0"):
         if item:
             result.add(_safe_path(item.decode("utf-8", errors="strict"), "staged path"))
     return result
+
+
+def _index_tree(repo: Path) -> str:
+    """Return the Git tree OID represented by the current index.
+
+    ``git write-tree`` serializes the index without consulting the worktree,
+    so this is the machine-issued identifier used to bind a reviewed staged
+    result to a later commit.  It also rejects an unmerged or otherwise
+    unusable index before a commit can be attempted.
+    """
+
+    tree = _git_text(repo, ["write-tree"])
+    if TREE_OID_RE.fullmatch(tree) is None:
+        raise GitGuardError("index treeを安全なGit tree OIDとして取得できません。", code="git_failed")
+    return tree
+
+
+def _tree_changed_paths(repo: Path, base_head: str, tree: str) -> set[str]:
+    try:
+        raw = _git(
+            repo,
+            [
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--ignore-submodules=none",
+                "--no-ext-diff",
+                "--no-textconv",
+                base_head,
+                tree,
+                "--",
+            ],
+        )
+        return set(snapshot_digest.nul_paths(raw, label="expected tree path"))
+    except (snapshot_digest.SnapshotError, UnicodeError) as exc:
+        raise GitGuardError(f"expected index treeのpathを安全に確認できません: {exc}", code="stale_evidence") from exc
+
+
+def index_tree(repo: str | Path) -> str:
+    """Return a machine-issued tree OID for a validated repository index."""
+
+    try:
+        root = snapshot_digest.canonical_target_root(repo)
+    except snapshot_digest.SnapshotError as exc:
+        raise GitGuardError(str(exc), code="invalid_target_root") from exc
+    _assert_branch_clean_state(root, require_branch=False)
+    return _index_tree(root)
+
+
+def _expected_index_tree(contract: Mapping[str, Any]) -> str:
+    raw = _extract(contract, "expected_index_tree", "authorization", "preconditions")
+    if raw is None:
+        raise GitGuardError("commit_non_amendにはexpected_index_treeが必要です。", code="stale_evidence")
+    value = _string(raw, "expected_index_tree")
+    if TREE_OID_RE.fullmatch(value) is None:
+        raise GitGuardError("expected_index_treeはhelper発行のGit tree OIDにしてください。", code="invalid_snapshot")
+    return value
 
 
 def _ensure_no_unrelated_staged(repo: Path, paths: Sequence[str]) -> set[str]:
@@ -383,6 +445,22 @@ def _assert_no_operation_state(repo: Path) -> None:
             if stat.S_ISLNK(mode) or not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
                 raise GitGuardError("Git operation state markerが安全な通常file/directoryではありません。", code="precondition_failed")
             raise GitGuardError("merge/rebase/cherry-pick state中はGit writeできません。", code="precondition_failed")
+
+
+def _branch_ref(repo: Path) -> str:
+    branch_ref = _git_text(repo, ["symbolic-ref", "--quiet", "HEAD"], check=False)
+    if (
+        not branch_ref.startswith("refs/heads/")
+        or "\0" in branch_ref
+        or "\r" in branch_ref
+        or "\n" in branch_ref
+        or ".." in branch_ref
+        or "//" in branch_ref
+        or branch_ref.endswith((".", "/"))
+        or "/." in branch_ref
+    ):
+        raise GitGuardError("current branch refを安全に確認できません。", code="precondition_failed")
+    return branch_ref
 
 
 def _assert_branch_clean_state(repo: Path, *, require_branch: bool = True) -> str:
@@ -612,42 +690,79 @@ def _commit_message(contract: Mapping[str, Any], scope: Mapping[str, Any]) -> st
     return _string(raw, "commit message", allow_newlines=True)
 
 
-def _run_commit(root: Path, contract: Mapping[str, Any], paths: Sequence[str], scope: Mapping[str, Any]) -> dict[str, Any]:
+def _run_commit(
+    root: Path,
+    contract: Mapping[str, Any],
+    paths: Sequence[str],
+    scope: Mapping[str, Any],
+    *,
+    expected_head: str,
+    branch_ref: str,
+) -> dict[str, Any]:
     _assert_branch_clean_state(root, require_branch=True)
+    if _branch_ref(root) != branch_ref:
+        raise GitGuardError("commit中にcurrent branch refが変化しました。", code="stale_evidence")
     staged = _ensure_no_unrelated_staged(root, paths)
     if not staged:
         raise GitGuardError("commit対象のstaged pathがありません。", code="precondition_failed")
     if any(not _covered(path, paths) for path in staged):
         raise GitGuardError("staged pathがexact commit scopeの外です。", code="scope_expansion")
-    for path in staged:
+    expected_tree = _expected_index_tree(contract)
+    actual_tree = _index_tree(root)
+    if actual_tree != expected_tree:
+        raise GitGuardError("review済みexpected_index_treeとactual index treeが一致しません。", code="stale_evidence")
+    committed_paths = _tree_changed_paths(root, expected_head, expected_tree)
+    if not committed_paths:
+        raise GitGuardError("expected_index_treeにcommit対象の変更がありません。", code="precondition_failed")
+    if any(not _covered(path, paths) for path in committed_paths):
+        outside = sorted(path for path in committed_paths if not _covered(path, paths))
+        raise GitGuardError(f"expected_index_treeにscope外の変更があります: {outside[0]}", code="scope_expansion")
+    for path in committed_paths:
         _ensure_no_symlink_path(root, path)
     message = _commit_message(contract, scope)
     try:
         identity_name, identity_email = snapshot_digest.resolve_git_identity(root)
     except (snapshot_digest.SnapshotError, OSError, UnicodeError) as exc:
         raise GitGuardError("Git commit identityを安全に解決できません。", code="precondition_failed") from exc
-    before_head = _git_text(root, ["rev-parse", "HEAD"])
-    # Explicitly disable hooks/signing and pass the resolved identity as
-    # literal config values, so the sanitized Git environment can still honor
-    # an intended local/global/system identity without executing helpers.
-    _git(
+    if _git_text(root, ["rev-parse", "HEAD"]) != expected_head:
+        raise GitGuardError("subject snapshot後にHEADが変化しました。", code="stale_evidence")
+
+    # `git commit` would reread the mutable index after the validation above.
+    # Build the commit from the already verified tree instead, then update the
+    # symbolic branch ref with the expected old HEAD.  This closes the index
+    # replacement window without introducing a process-wide lock or daemon.
+    commit = _git_text(
         root,
         [
             "-c",
             f"user.name={identity_name}",
             "-c",
             f"user.email={identity_email}",
-            "commit",
-            "--no-verify",
+            "commit-tree",
             "--no-gpg-sign",
+            expected_tree,
+            "-p",
+            expected_head,
             "-m",
             message,
         ],
     )
+    # A commit OID has the same SHA-1/SHA-256 width as a tree OID.
+    if TREE_OID_RE.fullmatch(commit) is None:
+        raise GitGuardError("commit-treeが安全なcommit OIDを返しませんでした。", code="git_failed")
+    _git(root, ["update-ref", "--no-deref", branch_ref, commit, expected_head])
     after_head = _git_text(root, ["rev-parse", "HEAD"])
-    if after_head == before_head:
-        raise GitGuardError("commit後のHEADが変化していません。", code="postcondition_failed")
-    return {"commit": after_head, "committed_paths": sorted(staged, key=lambda item: item.encode("utf-8"))}
+    if after_head != commit or after_head == expected_head:
+        raise GitGuardError("commit後のHEADが期待したcommitと一致しません。", code="postcondition_failed")
+    after_tree = _git_text(root, ["rev-parse", "--verify", "--end-of-options", f"{after_head}^{{tree}}"])
+    if after_tree != expected_tree:
+        raise GitGuardError("commit後のtreeがexpected_index_treeと一致しません。", code="postcondition_failed")
+    return {
+        "commit": after_head,
+        "expected_index_tree": expected_tree,
+        "commit_tree": after_tree,
+        "committed_paths": sorted(committed_paths, key=lambda item: item.encode("utf-8")),
+    }
 
 
 def apply(
@@ -665,6 +780,7 @@ def apply(
 
     contract_map, root, selected, subject_snapshot, paths = _validate_contract(contract, operation)
     scope = _scope(contract_map)
+    commit_branch_ref = _branch_ref(root) if selected == "commit_non_amend" else None
     pre_snapshot = _preflight_snapshot(root, subject_snapshot)
     if selected == "commit_non_amend":
         _ensure_no_unrelated_staged(root, paths)
@@ -677,7 +793,15 @@ def apply(
     elif selected == "unstage_index_only_exact_paths":
         evidence = _run_unstage(root, paths)
     elif selected == "commit_non_amend":
-        evidence = _run_commit(root, contract_map, paths, scope)
+        assert commit_branch_ref is not None
+        evidence = _run_commit(
+            root,
+            contract_map,
+            paths,
+            scope,
+            expected_head=str(subject_snapshot["revision_id"]),
+            branch_ref=commit_branch_ref,
+        )
     else:  # protected by _validate_contract; defensive for future changes
         raise GitGuardError(f"unsupported operation: {selected}", code="unsupported")
     post_snapshot = _post_snapshot(root, subject_snapshot)
@@ -710,6 +834,8 @@ def _read_contract(path: str | None) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command")
+    index_parser = sub.add_parser("index-tree", help="current indexのmachine-issued Git tree OIDを返します")
+    index_parser.add_argument("--repo", required=True, metavar="REPO")
     apply_parser = sub.add_parser("apply", help="one closed-allowlist Git operationを実行します")
     apply_parser.add_argument("--operation", choices=sorted(ALLOWED_OPERATIONS), required=True)
     apply_parser.add_argument("--contract", metavar="JSON")
@@ -725,6 +851,23 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "index-tree":
+        try:
+            root = snapshot_digest.canonical_target_root(args.repo)
+            tree = index_tree(root)
+            result = {
+                "ok": True,
+                "operation": "index_tree",
+                "target_repo_root": str(root),
+                "expected_index_tree": tree,
+            }
+        except (GitGuardError, OSError, UnicodeError, snapshot_digest.SnapshotError) as exc:
+            if not isinstance(exc, GitGuardError):
+                exc = GitGuardError(f"index treeを安全に取得できません: {exc}", code="invalid_input")
+            print(json.dumps({"ok": False, "error": exc.code, "message": str(exc)}, ensure_ascii=False, sort_keys=True), file=sys.stderr)
+            return 2 if exc.code == "unsupported" else 1
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+        return 0
     operation = args.operation if args.command == "apply" else args.direct_operation
     contract_path = args.contract if args.command == "apply" else args.direct_contract
     patch_path = args.patch_file if args.command == "apply" else args.direct_patch_file
@@ -737,7 +880,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif patch_path == "-":
             patch = sys.stdin.buffer.read()
         result = apply(contract, operation=operation, patch=patch)
-    except (GitGuardError, OSError, UnicodeError) as exc:
+    except (GitGuardError, OSError, UnicodeError, snapshot_digest.SnapshotError) as exc:
         if not isinstance(exc, GitGuardError):
             exc = GitGuardError(f"Git contract/patchを安全に読み込めません: {exc}", code="invalid_input")
         print(json.dumps({"ok": False, "error": exc.code, "message": str(exc)}, ensure_ascii=False, sort_keys=True), file=sys.stderr)

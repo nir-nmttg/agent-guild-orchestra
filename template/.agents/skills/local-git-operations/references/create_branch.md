@@ -6,10 +6,10 @@ read-onlyで現在ref、status、detached/merge/rebase状態、base存在、loca
 
 new refは目的を表す短いASCII名にし、secret、PII、長文チケット、内部URLを含めません。`git_guard` preflightとsnapshotが一致した時だけ新規refの作成・切替を行い、既存refへの上書き、force、discarding switchは使いません。作成後はcurrent ref、status、post-snapshotを報告します。
 
-現在導入されている`git_guard.py`、`snapshot_digest.py`と対応testを確認したうえで、clean rootからbranchを作る最小例は次の形です。`subject_snapshot`はhelper出力全体をそのまま使い、hashを記入しません。
+この配布のhelperでclean rootからbranchを作る最小例です。`subject_snapshot`はhelper出力全体をそのまま使い、hashを記入しません。
 
 ```python
-import json, pathlib, subprocess
+import json, pathlib, subprocess, tempfile
 
 guild_root = pathlib.Path("/absolute/path/to/asked-root")
 root = str(guild_root / "repositories/asked_backend")
@@ -19,19 +19,16 @@ snapshot = json.loads(subprocess.check_output([
     "--repo", root, "--kind", "revision_only",
 ], text=True))
 contract = {
-    "type": "assignment", "schema_version": "1.0", "id": "branch-create-1",
     "target_repo_root": root,
     "allowed_operations": ["branch_create_and_switch_new"],
     "path_or_ref_scope": {"paths": [], "base_ref": "HEAD", "new_branch": "codex/example-change"},
     "subject_snapshot": snapshot,
-    "preconditions": {"target_repo_root_confirmed": True, "preflight_snapshot_matches_assignment": True},
-    "postconditions": {},
-    "forbidden_operations": ["push", "reset", "commit_amend", "rebase", "clean"],
 }
-contract_path = pathlib.Path("/tmp/branch-create-contract.json")
-contract_path.write_text(json.dumps(contract), encoding="utf-8")
-subprocess.run([
-    "python3", str(runtime / "git_guard.py"), "apply",
-    "--operation", "branch_create_and_switch_new", "--contract", str(contract_path),
-], check=True)
+with tempfile.TemporaryDirectory(prefix="guild-git-") as temporary:
+    contract_path = pathlib.Path(temporary) / "contract.json"
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    subprocess.run([
+        "python3", str(runtime / "git_guard.py"), "apply",
+        "--operation", "branch_create_and_switch_new", "--contract", str(contract_path),
+    ], check=True)
 ```

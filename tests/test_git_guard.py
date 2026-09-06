@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -47,9 +48,18 @@ class GitGuardTests(unittest.TestCase):
         git(repo, "mv", "src/rename-old.txt", "src/rename-new.txt")
         return repo, "src/rename-old.txt", "src/rename-new.txt"
 
-    def contract(self, repo: Path, operation: str, snapshot: dict[str, object], *, paths: list[str] | None = None, **scope: object) -> dict[str, object]:
+    def contract(
+        self,
+        repo: Path,
+        operation: str,
+        snapshot: dict[str, object],
+        *,
+        paths: list[str] | None = None,
+        expected_index_tree: str | None = None,
+        **scope: object,
+    ) -> dict[str, object]:
         path_scope: dict[str, object] = {"paths": paths or [], **scope}
-        return {
+        contract: dict[str, object] = {
             "type": "assignment",
             "schema_version": "1.0",
             "id": "git-assignment-1",
@@ -61,6 +71,11 @@ class GitGuardTests(unittest.TestCase):
             "postconditions": {},
             "forbidden_operations": ["push", "reset", "commit_amend", "rebase", "clean"],
         }
+        if operation == "commit_non_amend":
+            contract["expected_index_tree"] = (
+                git_guard.index_tree(repo) if expected_index_tree is None else expected_index_tree
+            )
+        return contract
 
     def test_exact_stage_commit_and_index_only_unstage(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -131,6 +146,280 @@ class GitGuardTests(unittest.TestCase):
             self.assertEqual(unstage["postwrite_snapshot"]["untracked_paths"], ["src/new.txt"])
             self.assertEqual(path.read_text(encoding="utf-8"), "new content\n")
 
+    def test_nested_untracked_directory_stages_only_the_authorized_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "new/nested").mkdir(parents=True)
+            owned, unrelated = "new/nested/owned.txt", "new/nested/unrelated.txt"
+            (repo / owned).write_text("owned\n", encoding="utf-8")
+            (repo / unrelated).write_text("unrelated\n", encoding="utf-8")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo, kind="working_tree_content", scope_paths=[owned], untracked_paths=[owned],
+            )
+            staged = git_guard.apply(self.contract(repo, "stage_exact_paths_or_hunks", snapshot, paths=[owned]))
+            self.assertEqual(staged["evidence"]["staged_paths"], [owned])
+            commit_snapshot = snapshot_digest.compute_snapshot(
+                repo, kind="working_tree_content", scope_paths=[owned], untracked_paths=[],
+            )
+            committed = git_guard.apply(self.contract(
+                repo, "commit_non_amend", commit_snapshot, paths=[owned], message="add nested file",
+            ))
+            self.assertEqual(committed["evidence"]["committed_paths"], [owned])
+            self.assertEqual(git(repo, "ls-files", "--others", "--exclude-standard").splitlines(), [unrelated])
+            self.assertEqual((repo / unrelated).read_text(encoding="utf-8"), "unrelated\n")
+
+    def test_partial_stage_commit_uses_reviewed_index_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            git(repo, "commit", "--quiet", "-m", "expand fixture")
+            (repo / "src/owned.txt").write_text("one changed\ntwo\nthree\nfour changed\n", encoding="utf-8")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            patch = (
+                "diff --git a/src/owned.txt b/src/owned.txt\n"
+                "--- a/src/owned.txt\n"
+                "+++ b/src/owned.txt\n"
+                "@@ -1,2 +1,2 @@\n"
+                "-one\n"
+                "+one changed\n"
+                " two\n"
+            )
+            staged = git_guard.apply(
+                self.contract(repo, "stage_exact_paths_or_hunks", snapshot, paths=["src/owned.txt"], patch=patch)
+            )
+            self.assertEqual(staged["evidence"]["staged_paths"], ["src/owned.txt"])
+            expected_tree = git_guard.index_tree(repo)
+            commit_snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            committed = git_guard.apply(
+                self.contract(
+                    repo,
+                    "commit_non_amend",
+                    commit_snapshot,
+                    paths=["src/owned.txt"],
+                    expected_index_tree=expected_tree,
+                    message="partial staged commit",
+                )
+            )
+            self.assertEqual(committed["evidence"]["commit_tree"], expected_tree)
+            self.assertEqual(git(repo, "show", "HEAD:src/owned.txt"), "one changed\ntwo\nthree\nfour\n")
+            self.assertIn("src/owned.txt", git(repo, "status", "--porcelain"))
+
+    def test_index_replacement_after_review_is_rejected_without_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("reviewed B\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            expected_tree = git_guard.index_tree(repo)
+            (repo / "src/owned.txt").write_text("tampered C\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            (repo / "src/owned.txt").write_text("reviewed B\n", encoding="utf-8")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            contract = self.contract(
+                repo,
+                "commit_non_amend",
+                snapshot,
+                paths=["src/owned.txt"],
+                expected_index_tree=expected_tree,
+                message="must reject replaced index",
+            )
+            before_head = git(repo, "rev-parse", "HEAD")
+            with self.assertRaisesRegex(git_guard.GitGuardError, "index tree|expected_index_tree"):
+                git_guard.apply(contract)
+            self.assertEqual(git(repo, "rev-parse", "HEAD"), before_head)
+            self.assertEqual(git(repo, "show", ":src/owned.txt"), "tampered C\n")
+            self.assertEqual((repo / "src/owned.txt").read_text(encoding="utf-8"), "reviewed B\n")
+
+    def test_index_replacement_during_commit_window_commits_bound_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("reviewed B\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            expected_tree = git_guard.index_tree(repo)
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            contract = self.contract(
+                repo,
+                "commit_non_amend",
+                snapshot,
+                paths=["src/owned.txt"],
+                expected_index_tree=expected_tree,
+                message="commit bound tree",
+            )
+            original_index_tree = git_guard._index_tree
+            swapped = False
+
+            def replace_after_validation(index_root: Path) -> str:
+                nonlocal swapped
+                tree = original_index_tree(index_root)
+                if not swapped:
+                    swapped = True
+                    (repo / "src/owned.txt").write_text("tampered C\n", encoding="utf-8")
+                    git(repo, "add", "src/owned.txt")
+                    (repo / "src/owned.txt").write_text("reviewed B\n", encoding="utf-8")
+                return tree
+
+            with mock.patch.object(git_guard, "_index_tree", side_effect=replace_after_validation):
+                committed = git_guard.apply(contract)
+            self.assertEqual(committed["evidence"]["commit_tree"], expected_tree)
+            self.assertEqual(git(repo, "rev-parse", "HEAD^{tree}"), expected_tree + "\n")
+            self.assertEqual(git(repo, "show", "HEAD:src/owned.txt"), "reviewed B\n")
+            self.assertEqual(git(repo, "show", ":src/owned.txt"), "tampered C\n")
+
+    def test_subject_revision_drift_after_preflight_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("reviewed\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            expected_tree = git_guard.index_tree(repo)
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            contract = self.contract(
+                repo,
+                "commit_non_amend",
+                snapshot,
+                paths=["src/owned.txt"],
+                expected_index_tree=expected_tree,
+                message="must reject revision drift",
+            )
+            old_head = git(repo, "rev-parse", "HEAD").strip()
+            base_tree = git(repo, "rev-parse", "HEAD^{tree}").strip()
+            original_preflight = git_guard._preflight_snapshot
+            drifted_head: str | None = None
+
+            def drift_after_preflight(index_root: Path, expected: dict[str, object]) -> dict[str, object]:
+                nonlocal drifted_head
+                result = original_preflight(index_root, expected)
+                drifted_head = git(repo, "commit-tree", base_tree, "-p", old_head, "-m", "external drift").strip()
+                git(repo, "update-ref", "HEAD", drifted_head, old_head)
+                return result
+
+            with mock.patch.object(git_guard, "_preflight_snapshot", side_effect=drift_after_preflight):
+                with self.assertRaisesRegex(git_guard.GitGuardError, "HEAD|snapshot"):
+                    git_guard.apply(contract)
+            self.assertIsNotNone(drifted_head)
+            self.assertEqual(git(repo, "rev-parse", "HEAD").strip(), drifted_head)
+            self.assertEqual(git(repo, "show", "HEAD:src/owned.txt"), "before\n")
+
+    def test_update_ref_does_not_follow_replaced_symbolic_branch_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("reviewed\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            contract = self.contract(repo, "commit_non_amend", snapshot, paths=["src/owned.txt"], message="fixed ref")
+            old_head = git(repo, "rev-parse", "HEAD").strip()
+            branch_ref = git(repo, "symbolic-ref", "HEAD").strip()
+            git(repo, "branch", "unowned-branch", old_head)
+            original_git = git_guard._git
+            redirected = False
+
+            def replace_ref_before_update(root: Path, args: list[str], **kwargs: object) -> bytes:
+                nonlocal redirected
+                if args[:2] == ["update-ref", "--no-deref"] and not redirected:
+                    redirected = True
+                    git(repo, "symbolic-ref", branch_ref, "refs/heads/unowned-branch")
+                return original_git(root, args, **kwargs)
+
+            with mock.patch.object(git_guard, "_git", side_effect=replace_ref_before_update):
+                committed = git_guard.apply(contract)
+            self.assertTrue(redirected)
+            self.assertEqual(git(repo, "rev-parse", "refs/heads/unowned-branch").strip(), old_head)
+            self.assertEqual(git(repo, "rev-parse", "HEAD").strip(), committed["evidence"]["commit"])
+
+    def test_ignore_submodules_does_not_hide_scope_external_gitlink(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            old_head = git(repo, "rev-parse", "HEAD").strip()
+            base_tree = git(repo, "rev-parse", "HEAD^{tree}").strip()
+            next_commit = git(repo, "commit-tree", base_tree, "-p", old_head, "-m", "gitlink second revision").strip()
+            git(repo, "update-index", "--add", "--cacheinfo", f"160000,{old_head},vendor/module")
+            git(repo, "commit", "--quiet", "-m", "gitlink baseline")
+            git(repo, "config", "diff.ignoreSubmodules", "all")
+            git(repo, "update-index", "--cacheinfo", f"160000,{next_commit},vendor/module")
+            (repo / "src/owned.txt").write_text("reviewed\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            self.assertEqual(git_guard._staged_paths(repo), {"src/owned.txt", "vendor/module"})
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            contract = self.contract(
+                repo,
+                "commit_non_amend",
+                snapshot,
+                paths=["src/owned.txt"],
+                message="must reject extra gitlink",
+            )
+            before_head = git(repo, "rev-parse", "HEAD").strip()
+            with self.assertRaisesRegex(git_guard.GitGuardError, "unrelated.*vendor/module"):
+                git_guard.apply(contract)
+            self.assertEqual(git(repo, "rev-parse", "HEAD").strip(), before_head)
+
+    def test_index_tree_cli_returns_machine_issued_value(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("staged\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            command = [
+                sys.executable,
+                str(SCRIPTS / "git_guard.py"),
+                "index-tree",
+                "--repo",
+                str(repo),
+            ]
+            result = subprocess.run(command, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["ok"], True)
+            self.assertEqual(payload["expected_index_tree"], git_guard.index_tree(repo))
+
+    def test_commit_requires_reviewed_index_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            (repo / "src/owned.txt").write_text("staged\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            contract = self.contract(repo, "commit_non_amend", snapshot, paths=["src/owned.txt"])
+            del contract["expected_index_tree"]
+            with self.assertRaisesRegex(git_guard.GitGuardError, "expected_index_tree"):
+                git_guard.apply(contract)
+
     def test_rename_new_only_commit_scope_refuses_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo, old, new = self.make_staged_rename(Path(raw))
@@ -149,8 +438,10 @@ class GitGuardTests(unittest.TestCase):
             repo, old, new = self.make_staged_rename(Path(raw))
             snapshot = snapshot_digest.compute_snapshot(repo, kind="working_tree_content", scope_paths=[old, new], untracked_paths=[])
             contract = self.contract(repo, "commit_non_amend", snapshot, paths=[old, new], message="rename both endpoints")
+            expected_tree = contract["expected_index_tree"]
             committed = git_guard.apply(contract)
             self.assertEqual(committed["evidence"]["committed_paths"], sorted([old, new]))
+            self.assertEqual(committed["evidence"]["commit_tree"], expected_tree)
             self.assertEqual(git(repo, "status", "--porcelain"), "")
 
     def test_rename_new_only_unstage_preserves_old_staged_deletion(self) -> None:
@@ -211,6 +502,30 @@ class GitGuardTests(unittest.TestCase):
                 committed = git_guard.apply(self.contract(repo, "commit_non_amend", snapshot, paths=["src/owned.txt"], message="global identity"))
             self.assertEqual(committed["operation"], "commit_non_amend")
             self.assertEqual(git(repo, "show", "-s", "--format=%an|%ae"), "Synthetic Global|synthetic-global@example.invalid\n")
+
+    def test_commit_tree_explicitly_skips_gpg_signing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            repo = self.make_repo(base)
+            marker = base / "gpg-invoked"
+            gpg = base / "fake-gpg"
+            gpg.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 99\n", encoding="utf-8")
+            gpg.chmod(0o755)
+            git(repo, "config", "commit.gpgsign", "true")
+            git(repo, "config", "gpg.program", str(gpg))
+            (repo / "src/owned.txt").write_text("signed skip\n", encoding="utf-8")
+            git(repo, "add", "src/owned.txt")
+            snapshot = snapshot_digest.compute_snapshot(
+                repo,
+                kind="working_tree_content",
+                scope_paths=["src/owned.txt"],
+                untracked_paths=[],
+            )
+            committed = git_guard.apply(
+                self.contract(repo, "commit_non_amend", snapshot, paths=["src/owned.txt"], message="skip signing")
+            )
+            self.assertEqual(committed["operation"], "commit_non_amend")
+            self.assertFalse(marker.exists())
 
     def test_stage_rejects_repository_content_filter_before_execution(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -18,11 +18,11 @@ installerの`--target`は設定を置く非Git親（`guild_root`）です。Git 
 
 source treeとdestinationのsymlinkを拒否し、preflight完了前にtargetへ書き込みません。v3のmanaged hashは各導入先manifestをbaselineに使います。manifestのないv2は既知の旧配布hashと一致するfileのみ自動整理し、変更済み・未知のfileや可変状態は保持します。既存のunmanaged file、二方向に変更されたmanaged file、壊れたmanifestは衝突として停止します。
 
-変更fileはtransaction backupへコピーし、各fileを同じfilesystem上のtemporary fileからreplaceします。途中の例外では元のfileとabsenceを復元します。v2 major upgradeのarchiveは復旧可能なcold copyで、active v3 runtimeから参照しません。
+変更fileは親に置くtransaction backupへコピーし、各fileを同じfilesystem上のtemporary fileから適切な権限でreplaceします。途中の例外やCtrl-Cでは元のfile、権限、absenceを復元します。復元はfile単位で継続し、復元が不完全な場合はbackupを削除せず保存先を報告します。backupはDockerの削除対象となるcontainer層へ置きません。v2 major upgradeのarchiveは復旧可能なcold copyで、active v3 runtimeから参照しません。[復元手順と保証範囲](migration-v3.md#失敗時の復元)を参照してください。
 
 ## Git guard
 
-Git操作の前にtarget、operation、scope、snapshot、preconditionを固定し、現在のhelper snapshotと比較します。stale snapshot、scope外path、期待しないbranch / HEAD / dirty stateでは操作しません。操作後は新しいsnapshotを証跡として返します。
+Git操作の前にtarget、operation、scope、snapshotを固定し、現在のhelper snapshotと比較します。commitではレビューしたindex treeのOIDも`expected_index_tree`へ固定します。作業ファイルのsnapshotだけをstaged内容の証明にせず、確認済みtreeからcommitを作り、期待する旧HEADとの照合付きでrefを更新します。stale snapshot/tree、scope外path、期待しないbranch / HEAD / dirty stateでは操作しません。操作後は新しいsnapshotとcommit treeを証跡として返します。index-treeの取得はobject DB/index cacheへ書き込む可能性があるGit write準備であり、read-only探索には使いません。
 
 Git config、environment、hookなどがcommandをすり替えないようhelperは安全なenvironmentと明示optionを使います。local Git operationではhooksとsigningを明示的にskipします。通常のstatus/diff/snapshot/writeではsystem/global configを読み込まず、repository-local config include、content filter/process設定、working tree・index・`.git/info/attributes`の`filter`指定を、属性を評価しうる各Git subprocessの前に拒否します。commit identityの解決だけは狭い例外で、local/global/systemからeffective `user.name` / `user.email`だけを読み、redactした値を明示的にcommitへ渡します。`.gitattributes`によるEOL・binaryなどfilter以外の属性は利用できます。Git LFSを含むcontent filter使用repositoryはsnapshotもGit writeも明示的なunsupported errorで停止するため、filter変換後の内容をraw contentとして黙って扱うことも、filter commandを起動することもありません。tracked leaf symlinkもsnapshot/Git writeの対象外です。それでもGit helperはrepository permissionそのものを与えません。復旧困難な操作やremote更新は通常の人間確認を省略できません。
 

@@ -44,7 +44,11 @@ Dockerはこの明示された子だけを例外的に書き込み可能にし�
 
 ## 失敗時の復元
 
-処理中の例外では変更したfileをtransaction backupから自動復元し、途中のarchiveを取り除きます。既存の独自fileと子Git metadataは復元対象に含めず、そのまま保持します。強制kill、Docker daemon停止、電源断をまたぐ完全なtransactionは保証しません。更新中は同じ管理fileを他のtaskで編集しないでください。
+処理中の例外やCtrl-Cでは、変更したfileをtransaction backupから自動復元します。元と同一のfileは触らず、必要なfileは元の権限でatomic replaceします。一件の復元に失敗しても他のfileの復元を試み、全ての復元が成功した場合だけbackupと途中のarchiveを取り除きます。対象外の独自fileと子Git metadataには触れません。
+
+復元にも失敗した場合は、親の`.agent-guild-orchestra-recovery/transaction-.../`を残してstderrへ場所を報告します。子v3整理のbackupも親に置くため、Docker container削除後も残ります。`recovery.json`の`target`、対象path、元の存在状態、directory権限と、同じdirectory内のbackupを確認してください。対象と現在の差分を照合し、権限や容量の問題を解消してから必要なfileだけを戻します。元々存在しなかったfileの一覧も含まれるため、一括コピーや自動再実行による復旧は行いません。復旧と確認を終えるまでbackupを削除しないでください。
+
+これは処理単位の復旧用backupであり、常駐runtimeや自動replay機構ではありません。強制kill、Docker daemon停止、電源断をまたぐ完全なtransactionは保証しません。更新中は同じ管理fileを他のtaskで編集しないでください。
 
 成功後に戻す場合、archive.jsonの対象一覧と現状の差分を先に確認してください。archiveを親や子へ一括上書きすると、その後のユーザー変更を失うため行わないでください。v2 archiveは旧fileの退避であり、新配布fileを含む全workspace backupではありません。子v3の退避はmetadataの`child`と照合し、戻すfileだけを選んで復元します。
 
@@ -55,4 +59,4 @@ Dockerはこの明示された子だけを例外的に書き込み可能にし�
 ./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
 ~~~
 
-親manifestをbaselineに更新します。配布元と導入先の双方で変更されたfileは手動で統合し、AGENTS.mdのblock外やuser-owned configは保持します。既存の子設定は`child_overrides`に表示されます。親の`AGENTS.override.md`がある場合もAGENTS.mdより優先されるため、[設定継承の注意](parent-layout.md)を確認してください。
+親manifestをbaselineに更新します。配布元と導入先の双方で変更されたfileは手動で統合し、AGENTS.mdのblock外や既存権限、user-owned configは保持します。権限だけが配布時の値と異なる管理fileもlocal変更として扱い、更新時は衝突として停止、package除外時は保持します。旧版の配布権限を確定できないfileも保守的に保持します。既存の子設定は`child_overrides`に表示されます。親の`AGENTS.override.md`がある場合もAGENTS.mdより優先されるため、[設定継承の注意](parent-layout.md)を確認してください。

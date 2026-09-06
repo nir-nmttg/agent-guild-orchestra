@@ -14,7 +14,7 @@ metadata:
 
 - 実装、修正、設定変更の主要な挙動、回帰、境界を確認する時
 - unit testだけでは不十分なCLI、API、UI、生成物、ログ、永続化を確かめる時
-- security、installer/runtime contract、Git/external publication、breaking compatibility、migration、広いblast radius、重要unknownが残る時に独立reviewを判断する時
+- security、installer/runtimeやGit安全契約の変更、影響の大きい外部公開、breaking compatibility、migration、広いblast radius、重要unknownが残る時に独立reviewを判断する時
 
 ## 手順
 
@@ -22,7 +22,7 @@ metadata:
 2. 主要正常系、異常系、境界、権限、互換性から、criteriaを直接示す最小のcheckを選ぶ。
 3. repoのtest、lint、typecheck、build、CLI、local API/UI確認を優先し、必要ならsanitized temp dataだけを使う。
 4. 各checkを`pass`、`fail`、`blocked`、`not_applicable`へ分類する。failには再現、期待、実測、原因、最小actionを付ける。
-5. material risk triggerがある時だけ、current diffとevidenceを`inquisitor`へfresh read-only reviewとして渡す。修復済みroutine failureだけでは起動しない。
+5. material risk triggerがある時だけ、current diffとevidenceを`inquisitor`へfresh read-only reviewとして渡す。通常のlocal branch/stage/commitや修復済みroutine failureだけでは起動しない。
 
 ## 出力
 

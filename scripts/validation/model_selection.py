@@ -67,6 +67,28 @@ def validate_model_selection_eval() -> None:
         rejected = run("--validate-results", str(malformed))
         require(rejected.returncode == 2 and "sequential" in rejected.stderr, "incoherent attempt accounting was accepted")
 
+        quality_retry = json.loads(json.dumps(rows[1]))
+        quality_retry["attempts"][0]["stages"][1]["status"] = "completed"
+        quality_retry["attempts"][0]["stages"][1]["failure_evidence"] = None
+        quality_retry["attempts"][0]["stages"][1]["evidence_refs"] = ["synthetic:quality-failure"]
+        quality_retry_rows = json.loads(json.dumps(rows))
+        quality_retry_rows[1] = quality_retry
+        write_rows(malformed, quality_retry_rows)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, "quality failure before retry was rejected")
+
+        quality_final = json.loads(json.dumps(rows[0]))
+        quality_final["provenance"]["run_id"] = "synthetic-quality-final"
+        quality_final["accepted"] = False
+        quality_final["acceptance_evidence"][0]["passed"] = False
+        quality_final["acceptance_evidence"][0]["evidence"] = "synthetic quality failure"
+        quality_final["attempts"][0]["accepted"] = False
+        quality_final_rows = json.loads(json.dumps(rows))
+        quality_final_rows[0] = quality_final
+        write_rows(malformed, quality_final_rows)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, "completed invocation with failed rubric was rejected")
+
         missing_failure = json.loads(json.dumps(rows[1]))
         missing_failure["attempts"][0]["stages"][1]["failure_evidence"] = None
         write_rows(malformed, [missing_failure])
@@ -97,7 +119,7 @@ def validate_model_selection_eval() -> None:
         rejected = run("--validate-results", str(malformed))
         require(rejected.returncode == 2 and "duplicate invocation_id" in rejected.stderr, "duplicate invocation was accepted")
 
-        # A root user override is recorded as effective event data and is
+        # A root effort override is recorded as effective event data and is
         # permitted only when the provenance explicitly marks it.
         manual_rows = json.loads(json.dumps(rows))
         for index, row in enumerate(manual_rows):
@@ -114,6 +136,35 @@ def validate_model_selection_eval() -> None:
         write_rows(malformed, manual_rows)
         accepted = run("--validate-results", str(malformed))
         require(accepted.returncode == 0, accepted.stderr)
+
+        wrong_root_model = json.loads(json.dumps(override))
+        wrong_root_model["provenance"]["run_id"] = "manual-wrong-root-model"
+        wrong_root_model["attempts"][0]["stages"][0]["model"] = "gpt-5.6-luna"
+        write_rows(malformed, [wrong_root_model])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "root model must remain" in rejected.stderr, "root model override was accepted")
+
+        mixed_root_effort_rows = json.loads(json.dumps(manual_rows))
+        mixed_root_effort = next(row for row in mixed_root_effort_rows if row["strategy"] == "astra_luna")
+        mixed_root_effort["provenance"]["root_override"] = True
+        mixed_root_effort["attempts"][1]["stages"][0]["reasoning_effort"] = "xhigh"
+        write_rows(malformed, mixed_root_effort_rows)
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "must remain consistent" in rejected.stderr, "mixed Root effort conditions were accepted")
+
+        write_rows(malformed, manual_rows)
+        manual_summary = run("--summarize", str(malformed))
+        require(manual_summary.returncode == 0, manual_summary.stderr)
+        manual_value = json.loads(manual_summary.stdout)
+        root_conditions = {
+            (group["strategy"], group["root_model"], group["root_reasoning_effort"])
+            for group in manual_value["groups"]
+        }
+        require(
+            ("astra_only", "gpt-6-astra", "high") in root_conditions
+            and ("astra_only", "gpt-6-astra", "xhigh") in root_conditions,
+            "summary mixed Root effort conditions",
+        )
 
         # This is synthetic shape-only data written to a temporary file. It
         # exercises the observed contract and is never published as a benchmark.

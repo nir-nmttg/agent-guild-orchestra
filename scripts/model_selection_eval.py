@@ -203,6 +203,18 @@ def expected_model(manifest: dict[str, Any], strategy: str, role: str) -> dict[s
     return None
 
 
+def record_root_pair(record: dict[str, Any], task_id: str) -> tuple[str, str]:
+    pairs = {
+        (event["model"], event["reasoning_effort"])
+        for attempt in record["attempts"]
+        for event in attempt["stages"]
+        if event["role"] == "root"
+    }
+    if len(pairs) != 1:
+        raise EvalError(f"{task_id} root model/effort must remain consistent across attempts")
+    return next(iter(pairs))
+
+
 def validate_provenance(provenance: object, kind: str, task_id: str) -> None:
     required = {
         "run_id", "session_ref", "target_revision", "codex_version",
@@ -299,10 +311,12 @@ def validate_event(
     root_override = role == "root" and provenance["root_override"] is True
     if strategy == "astra_only" and role == "worker":
         raise EvalError(f"{task_id} astra_only may not record a worker event")
-    if expected is not None and not root_override and (model != expected["model"] or effort != expected["reasoning_effort"]):
-        raise EvalError(f"{task_id} {strategy} {role} model/effort mismatch")
-    if role != "root" and provenance["root_override"] is True and expected is not None and (model != expected["model"] or effort != expected["reasoning_effort"]):
-        raise EvalError(f"{task_id} only the root event may use root_override")
+    if expected is not None:
+        if root_override and role == "root":
+            if model != expected["model"]:
+                raise EvalError(f"{task_id} root model must remain {expected['model']}; root_override only permits effort changes")
+        elif model != expected["model"] or effort != expected["reasoning_effort"]:
+            raise EvalError(f"{task_id} {strategy} {role} model/effort mismatch")
     failure = event["failure_evidence"]
     if event["status"] == "failed":
         nonempty_string(failure, f"{task_id} failed event {event_index}.failure_evidence")
@@ -400,10 +414,9 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
             failed = failed or event["status"] == "failed"
         if "root" not in observed_roles:
             raise EvalError(f"{task_id} attempt {attempt_index} must account for root usage")
-        if not attempt["accepted"] and not failed:
-            raise EvalError(f"{task_id} unsuccessful attempt {attempt_index} must identify a failed event")
         if attempt["accepted"] and failed:
             raise EvalError(f"{task_id} accepted attempt {attempt_index} may not contain a failed event")
+    record_root_pair(record, task_id)
     final_roles = {event["role"] for event in attempts[-1]["stages"]}
     if task["review_required"] and "review" not in final_roles:
         raise EvalError(f"{task_id} final attempt requires the independent review")
@@ -451,11 +464,12 @@ def _sum_wall_time(rows: list[dict[str, Any]]) -> tuple[float | None, str]:
 
 
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        grouped[(row["evidence_kind"], row["split"], row["strategy"])].append(row)
+        root_model, root_effort = record_root_pair(row, row["task_id"])
+        grouped[(row["evidence_kind"], row["split"], row["strategy"], root_model, root_effort)].append(row)
     output: dict[str, Any] = {"groups": []}
-    for (kind, split, strategy), values in sorted(grouped.items()):
+    for (kind, split, strategy, root_model, root_effort), values in sorted(grouped.items()):
         total_tokens, token_basis = _sum_measurements(values, "tokens", "usage_source", {"observed", "synthetic"})
         total_codex_usage, codex_basis = _sum_measurements(values, "codex_usage", "usage_source", {"observed"})
         total_account_cost, account_cost_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"account_reported"})
@@ -475,6 +489,8 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "evidence_kind": kind,
                 "split": split,
                 "strategy": strategy,
+                "root_model": root_model,
+                "root_reasoning_effort": root_effort,
                 "assigned_tasks": assigned,
                 "accepted_tasks": accepted,
                 "acceptance_rate": accepted / assigned,

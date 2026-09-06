@@ -10,9 +10,9 @@ Agent Guild Orchestra 3はCodexのproject-local configuration、二つのcustom 
 
 ## Rootとdelegation
 
-RootはAstra modelを使い、project configでreasoning effortを固定せず、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。
+RootはAstra modelを使い、project configでreasoning effortを固定せず、user-selected supported effortを尊重します。小さな一続きの作業はRootが直接終え、十分に独立したbounded scopeだけをAdventurerへ渡します。AdventurerはLuna / maxのworkerで、追加agentやcross-scope integrationを行いません。hostのnative interfaceでnamed agentまたは明示model/effortを選び、Rootのmodelを意図せず継承させません。独立した作業には、hostが対応する短い独立contextを渡します。role選択が利用できない場合はその制約を報告します。
 
-InquisitorはAstra / xhighのfresh independent read-only reviewerです。security、installer/runtime contract、Git/external publication、breaking compatibility、migration、広いblast radius、important unresolved questionのmaterial triggerでだけ使います。routine check failureを修復して再実行できたことだけでは起動しません。reviewが不要なlow-risk taskは直接完了できます。
+InquisitorはAstra / xhighのfresh independent read-only reviewerです。security、installer/runtimeやGit安全契約の変更、影響の大きい外部公開、breaking compatibility、migration、広いblast radius、important unresolved questionのmaterial triggerでだけ使います。通常のlocal branch/stage/commitやroutine check failureの修復再実行だけでは起動しません。reviewが不要なlow-risk taskは直接完了できます。
 
 Rootはintegration前にtarget、全initial status/diff、planned writer unionを記録します。worker結果を統合した後、そのunionと実際の変更を照合し、pre-existing user editを保持します。union外の変更や帰属不明の変更を見つけたら停止して報告します。別writerの変更を自動revertしたり、attribution engineを作ったりしません。
 
@@ -24,7 +24,7 @@ Codexのworker上限は設定値であり、tokenやcostの上限ではありま
 
 ## Gitとsnapshot
 
-Git writeまたは明示的なstale-risk確認の時だけ`snapshot_digest`を使います。探索だけでsnapshotを作りません。`git_guard`はexact operation、target、scope、precondition、pre-snapshotを照合し、限定されたlocal Git write後にpost-snapshotを返します。両helperはcaller identityやrepository permissionを証明しません。
+Git writeまたは明示的なstale-risk確認の時だけ`snapshot_digest`を使います。探索だけでsnapshotを作りません。`git_guard`はexact operation、target、scope、pre-snapshotを照合し、限定されたlocal Git write後にpost-snapshotを返します。commitは準備時に発行・レビューした`expected_index_tree`へ固定し、そのtreeと期待する旧HEADでcommitします。両helperはcaller identityやrepository permissionを証明しません。
 
 content-unchanged stageは追加のmodel reviewを発生させません。hooksとsigningはhelperが明示的にskipします。Git LFS/content-filter repository、content filter/process設定、tracked leaf symlinkはsnapshot/Git writeのunsupported境界として停止します。credential-like filenameはworkerの固定heuristicで読み取り対象から除外し、結果へ内容を記録しません。
 

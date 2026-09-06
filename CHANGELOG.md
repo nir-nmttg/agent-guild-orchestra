@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+- 更新・子整理の例外/Ctrl-Cで復元し、復元失敗や再中断ではDocker削除後も親に復旧backupを保持。不要なcandidateの一時disk複製を削除
+- AGENTS.mdの既存権限と管理fileのmode変更を保持し、旧v2の既知の配布modeも区別
+- commitをレビュー済みindex treeへ固定し、同一pathのindex差し替えを検知。Git操作例の不要な宣言項目と固定temporary filenameを整理
+- 未追跡directory内のfileをGit guardが誤って拒否する問題を修正し、指定fileだけをstage/commitする回帰試験を追加
+- Rootのeffort選択とLuna/max指定の説明を分離し、通常のlocal Git操作だけではInquisitorを追加起動しないよう指示を明確化
+- 評価器で品質不合格と実行失敗を区別し、Rootのmodel照合とeffort別集計を追加
+- maintainer用のCodex実機確認scriptを追加。親/子の設定・Skill探索と実spawnを分けて検証し、観測できないmodel/effort/permissionを成功扱いしない
 - 非Git親を標準導入先に戻し、設定rootと実Git rootを分離。子repositoryのfile/index/config/ignore ruleは通常導入・更新で変更しない
 - 親manifestをschema 2にし、旧親の未変更配布物だけをhashで確認して退避。独自設定・変更済みfile・第三者Skillを保持
 - 子側v3からの移行用に、明示された子の未変更・未追跡配布物だけを扱う独立したDocker cleanupを追加

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -76,6 +77,7 @@ class ParentInstallTests(unittest.TestCase):
     def legacy(self):
         fixture = ROOT / "scripts/validation/fixtures/legacy-v2"
         shutil.copytree(fixture, self.parent, dirs_exist_ok=True)
+        (self.parent / ".codex/hooks/stop_quality_gate.sh").chmod(0o755)
         path = self.parent / "AGENTS.md"
         path.write_text(install.AGENTS_START + "\n" + path.read_text().strip() + "\n" + install.AGENTS_END + "\n\nuser rule\n")
         put(self.parent, ".agents/skills/third-party/SKILL.md", "third party\n")
@@ -115,7 +117,8 @@ class ParentInstallTests(unittest.TestCase):
     def test_custom_parent_config_and_user_agents_are_preserved(self):
         config = put(self.parent, ".codex/config.toml", 'model = "my-model"\n')
         config.chmod(0o600)
-        put(self.parent, "AGENTS.md", "User instructions\n")
+        agents = put(self.parent, "AGENTS.md", "User instructions\n")
+        agents.chmod(0o600)
         put(self.parent, "AGENTS.override.md", "User override\n")
         before = (config.read_bytes(), config.stat().st_mode)
         plan = self.run_install()
@@ -125,6 +128,7 @@ class ParentInstallTests(unittest.TestCase):
         self.run_install()
         self.assertEqual((config.read_bytes(), config.stat().st_mode), before)
         self.assertTrue((self.parent / "AGENTS.md").read_text().startswith("User instructions"))
+        self.assertEqual(agents.stat().st_mode & 0o777, 0o600)
         with self.assertRaisesRegex(install.InstallError, "collision"):
             self.run_install("--config-mode", "managed")
         self.assert_children_unchanged()
@@ -158,6 +162,7 @@ class ParentInstallTests(unittest.TestCase):
         self.assertTrue((archive / ".codex/config.toml").is_file())
         self.assertEqual(modified.read_text(), "user modified role\n")
         self.assertFalse((self.parent / ".agents/skills/explain-clearly/SKILL.md").exists())
+        self.assertFalse((self.parent / ".codex/hooks/stop_quality_gate.sh").exists())
         self.assertTrue((self.parent / ".agents/skills/third-party/SKILL.md").is_file())
         self.assertIn("user rule", (self.parent / "AGENTS.md").read_text())
         hooks = json.loads((self.parent / ".codex/hooks.json").read_text())
@@ -183,8 +188,8 @@ class ParentInstallTests(unittest.TestCase):
                     (self.parent / install.ARCHIVE_ROOT_REL).mkdir()
                 before = tree(self.parent)
                 original = install.write_atomic
-                def fail_manifest(path, data):
-                    original(path, data)
+                def fail_manifest(path, data, **kwargs):
+                    original(path, data, **kwargs)
                     if path == self.parent / install.MANIFEST_REL:
                         raise OSError("injected failure")
                 with patch.object(install, "write_atomic", side_effect=fail_manifest):
@@ -239,6 +244,7 @@ class ParentInstallTests(unittest.TestCase):
         self.assertEqual(tree(child / ".git"), git_before)
         self.assertEqual(modified.read_text(), "user modifications\n")
         self.assertEqual((child / "AGENTS.md").read_text(), "my child rule\n")
+        self.assertEqual((child / "AGENTS.md").stat().st_mode & 0o777, 0o644)
         self.assertTrue((child / tracked).exists())
         self.assertFalse((child / ".codex/agents/inquisitor.toml").exists())
         self.assertTrue((child / ".agents/skills/third-party/SKILL.md").exists())
@@ -313,6 +319,147 @@ class ParentInstallTests(unittest.TestCase):
                 cleanup_child.execute(self.parent, child, False)
         self.assertEqual(path.read_text(), "late user edit\n")
         self.assertTrue((child / ".codex/agents/adventurer.toml").is_file())
+
+    @unittest.skipIf(os.geteuid() == 0, "permission failure requires the normal non-root installer UID")
+    def test_unwritable_update_destination_does_not_abort_other_restores(self):
+        self.run_install()
+        source = self.base / "distribution/template"
+        shutil.copytree(ROOT / "template", source)
+        for name in (".agents/orchestra/README.md", ".agents/orchestra/scripts/git_guard.py"):
+            path = source / name
+            path.write_bytes(path.read_bytes() + b"\n# next distribution\n")
+        protected = self.parent / ".agents/orchestra/scripts"
+        protected.chmod(0o555)
+        try:
+            before = tree(self.parent)
+            with self.assertRaises(PermissionError):
+                self.run_install("--source", str(source), "--allow-non-default-source")
+            self.assertEqual(tree(self.parent), before)
+            self.assert_children_unchanged()
+        finally:
+            protected.chmod(0o755)
+
+    def test_restore_failure_keeps_host_backup_and_continues_other_restores(self):
+        user = put(self.parent, "AGENTS.md", "Private user rule\n")
+        user.chmod(0o600)
+        original = install.write_atomic
+        restoring = False
+        def exhausted(path, data, **kwargs):
+            nonlocal restoring
+            if restoring and path == user:
+                raise OSError("injected ENOSPC during restore")
+            original(path, data, **kwargs)
+            if path == self.parent / install.MANIFEST_REL:
+                restoring = True
+                raise OSError("injected ENOSPC after final write")
+        with patch.object(install, "write_atomic", side_effect=exhausted), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(install.InstallError, "rollback incomplete; recovery backup retained"):
+                self.run_install()
+        backups = list((self.parent / install.RECOVERY_ROOT_REL).glob("transaction-*"))
+        self.assertEqual(len(backups), 1)
+        backup = backups[0]
+        self.assertEqual((backup / "AGENTS.md").read_text(), "Private user rule\n")
+        self.assertEqual((backup / "AGENTS.md").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads((backup / "recovery.json").read_text())["target"], str(self.parent))
+        self.assertTrue(user.exists())  # Failed restoration must never unlink the destination first.
+        self.assertFalse((self.parent / install.MANIFEST_REL).exists())
+        self.assertFalse((self.parent / ".codex/agents/adventurer.toml").exists())
+        self.assert_children_unchanged()
+
+    def test_sigint_restores_install_and_child_cleanup(self):
+        for cleanup in (False, True):
+            with self.subTest(cleanup=cleanup):
+                if cleanup:
+                    self.run_install()
+                    target = self.children[0]
+                    self.old_child(target)
+                    agents = target / "AGENTS.md"
+                    agents.write_text(agents.read_text() + "\nuser child rule\n")
+                else:
+                    target = self.parent
+                    put(target, "AGENTS.md", "User rule\n")
+                before = tree(self.parent)
+                original = install.write_atomic
+                interrupted = False
+                def interrupt_after_write(path, data, **kwargs):
+                    nonlocal interrupted
+                    original(path, data, **kwargs)
+                    if path == target / "AGENTS.md" and not interrupted:
+                        interrupted = True
+                        os.kill(os.getpid(), signal.SIGINT)
+                with patch.object(install, "write_atomic", side_effect=interrupt_after_write):
+                    with self.assertRaises(KeyboardInterrupt):
+                        if cleanup:
+                            cleanup_child.execute(self.parent, target, False)
+                        else:
+                            self.run_install()
+                self.assertTrue(interrupted)
+                self.assertEqual(tree(self.parent), before)
+
+    def test_mode_only_edits_block_updates_and_survive_package_removal(self):
+        skill = "create-skill-candidate-from-gap"
+        self.run_install("--with-skill", skill)
+        role = self.parent / ".codex/agents/adventurer.toml"
+        role.chmod(0o600)
+        source = self.base / "distribution/template"
+        shutil.copytree(ROOT / "template", source)
+        shutil.copytree(ROOT / "optional-skills", source.parent / "optional-skills")
+        changed = source / ".codex/agents/adventurer.toml"
+        changed.write_bytes(changed.read_bytes() + b"\n# next distribution\n")
+        before = tree(self.parent)
+        with self.assertRaisesRegex(install.InstallError, "locally and in distribution"):
+            self.run_install("--source", str(source), "--allow-non-default-source")
+        self.assertEqual(tree(self.parent), before)
+        skill_file = self.parent / ".agents/skills" / skill / "SKILL.md"
+        skill_file.chmod(0o600)
+        self.run_install("--without-skill", skill)
+        self.assertTrue(skill_file.is_file())
+        self.assertEqual(skill_file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(role.stat().st_mode & 0o777, 0o600)
+        self.assert_children_unchanged()
+
+    def test_recovery_destination_symlink_is_rejected_before_mutation(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        (self.parent / install.RECOVERY_ROOT_REL).symlink_to(outside)
+        before = tree(self.parent)
+        with self.assertRaisesRegex(install.InstallError, "symlink"):
+            self.run_install()
+        self.assertEqual(tree(self.parent), before)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_legacy_wrapper_mode_change_and_interrupted_archive(self):
+        self.legacy()
+        wrapper = self.parent / ".codex/hooks/stop_quality_gate.sh"
+        wrapper.chmod(0o644)  # Removing the historical execute bit is a user edit.
+        self.assertNotIn(Path(".codex/hooks/stop_quality_gate.sh"), install.legacy_paths(self.parent))
+        before = tree(self.parent)
+        copy = shutil.copy2
+        def interrupt_copy(src, dst, *args, **kwargs):
+            result = copy(src, dst, *args, **kwargs)
+            if str(install.ARCHIVE_ROOT_REL) in str(dst):
+                raise KeyboardInterrupt()
+            return result
+        with patch.object(shutil, "copy2", side_effect=interrupt_copy):
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_install()
+        self.assertEqual(tree(self.parent), before)
+        self.run_install()
+        self.assertTrue(wrapper.is_file())
+        self.assertEqual(wrapper.stat().st_mode & 0o777, 0o644)
+
+    def test_legacy_optional_script_modes_do_not_change_v3_mode_policy(self):
+        names = [rel for rel in install.LEGACY_MODES if ".agents" in rel.parts]
+        data = b"# synthetic legacy script fixture\n"
+        catalog = {"files": {str(rel): [install.sha256_bytes(data)] for rel in names}, "hook_commands": []}
+        with patch.object(install, "legacy_catalog", return_value=catalog):
+            for rel in names:
+                path = put(self.parent, str(rel), data)
+                path.chmod(0o644)
+                self.assertIn(rel, install.legacy_paths(self.parent))
+                path.chmod(0o755)
+                self.assertNotIn(rel, install.legacy_paths(self.parent))
+                self.assertFalse(install.locally_modified_mode(path, rel))  # v3 scripts are executable.
 
 
 

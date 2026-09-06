@@ -23,6 +23,7 @@ cp -R "$parent/repositories" "$fixture/before"
 # Populate recognized v2 files without relying on host Python or Git history.
 cp -R "$SCRIPT_DIR/validation/fixtures/legacy-v2/.codex" "$parent/.codex"
 cp -R "$SCRIPT_DIR/validation/fixtures/legacy-v2/.agents" "$parent/.agents"
+chmod 755 "$parent/.codex/hooks/stop_quality_gate.sh"
 bash "$SCRIPT_DIR/install.sh" --target "$parent" --dry-run > "$fixture/dry.json"
 [[ ! -e "$parent/AGENTS.md" ]]
 [[ -f "$parent/.codex/agents/captain.toml" ]]
@@ -50,4 +51,15 @@ diff -r "$fixture/with-child-v3" "$parent/repositories"
 bash "$SCRIPT_DIR/cleanup-child.sh" --target "$parent" --child "$linked" > "$fixture/cleanup.json"
 [[ ! -e "$linked/AGENTS.md" && ! -e "$linked/.agents/orchestra/install-manifest.json" ]]
 diff -r "$fixture/before" "$parent/repositories"
+
+# Exercise real SIGINT delivery inside the container and a second storage error
+# during restore. The latter's recovery copy must remain after Docker --rm.
+docker run --rm --network none --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$SCRIPT_DIR/..,target=/distribution,readonly" \
+  --mount "type=bind,source=$fixture,target=/fixture" "$image_id" \
+  python3 /distribution/tests/docker_recovery_probe.py /fixture
+[[ -f "$fixture/interrupted/AGENTS.md" ]]
+[[ ! -e "$fixture/interrupted/.agent-guild-orchestra-recovery" ]]
+recovery=("$fixture/restore-failed/.agent-guild-orchestra-recovery/"transaction-*)
+[[ ${#recovery[@]} == 1 && -f "${recovery[0]}/AGENTS.md" && -f "${recovery[0]}/recovery.json" ]]
 printf 'docker parent install, sync, migration and explicit child cleanup: ok\n'

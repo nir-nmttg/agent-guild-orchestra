@@ -9,7 +9,7 @@ Agent Guild Orchestra 3.0.0は、Codexのproject-local設定、二つのcustom a
 
 ## 動作の概要
 
-Rootはgpt-6-astraで動き、reasoning effortはprojectで固定せず、利用者がtask/sessionで選んだsupported値に従います。Rootは小さな作業を直接完了でき、分離する価値がある実装をAdventurerへ渡します。Adventurerはgpt-5.6-luna / maxです。security、installer、Git、migration、互換性などのmaterial riskは、実装者から独立したread-onlyのInquisitor（Astra / xhigh）が確認します。
+Rootはgpt-6-astraで動き、reasoning effortはprojectで固定せず、利用者がtask/sessionで選んだsupported値に従います。Rootは小さな作業を直接完了でき、分離する価値がある実装をAdventurerへ渡します。Adventurerはgpt-5.6-luna / maxです。security、installerやGit安全契約の変更、migration、互換性などのmaterial riskは、実装者から独立したread-onlyのInquisitor（Astra / xhigh）が確認します。通常のlocal branch/stage/commitだけでは追加のmodel reviewを要求しません。
 
 custom agentはAdventurerとInquisitorだけです。旧版の十role、Quest / Party / Guild、rank、SQLite queue、inbox、Ledger、dashboard、Stop hook、二重settingsは3.0.0にありません。
 
@@ -65,7 +65,7 @@ codex --cd /Users/nir-nmttg/Projects/achromono/asked-root
 
 独自configを保持した場合は、Astra model、1M context、agents enabled/max2、multi_agent、experimental context managementを手動で整合させます。Guildmasterのeffortは利用者がtask/sessionで選びます。子のAGENTS指示はコード変更前に読み、既存の子config・Skill・named agentとの競合を確認します。installerは該当pathを`child_overrides`へ表示し、子設定を自動mergeしません。
 
-Codex 0.153.3で親のeffective config、AGENTS.md、五つのSkillの読み込みを確認しました。named agentの実呼び出しとlive permissionは未確認です。確認方法・設定継承の範囲・制約は[親配置の設計と検証](docs/parent-layout.md)に記載しています。ファイル配置の成功だけではactivation完了を意味しません。
+Codex 0.153.3で親のeffective config、AGENTS.md、五つのSkillの読み込みと子設定との分離を確認しました。named agentの実機確認は最初のturnが45秒の上限に達し、実呼び出しと子のlive permissionは未確認です。再実行用script・設定継承の範囲・制約は[親配置の設計と検証](docs/parent-layout.md)に記載しています。ファイル配置の成功だけではactivation完了を意味しません。
 
 ## 更新
 
@@ -76,7 +76,7 @@ make validate
 ./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
 ~~~
 
-配布元だけの変更は更新し、導入先だけの変更は保持します。同じmanaged fileが両方で変わると、書き込み前に衝突として停止します。candidateの事前組立て・変更対象のbackup・各fileのatomic replaceを行い、途中の例外では復元します。symlinkを経由する管理pathは拒否します。
+配布元だけの変更は更新し、導入先だけの変更は保持します。権限だけの変更もlocal変更として扱い、同じmanaged fileが両方で変わると書き込み前に衝突として停止します。共有AGENTS.mdの既存権限は維持します。candidateの事前検証・変更対象のbackup・各fileのatomic replaceを行い、途中の例外やCtrl-Cでは復元します。復元にも失敗した場合は、親の`.agent-guild-orchestra-recovery/transaction-.../`へbackupを残し、場所を報告します。symlinkを経由する管理pathは拒否します。
 
 旧親環境も同じ`--target`で更新します。確認できる旧配布fileだけを親内へ退避します。以前の子側v3配置の整理は、通常install/updateとは別の明示操作です。[移行ガイド](docs/migration-v3.md)を参照してください。
 
@@ -105,7 +105,7 @@ maintainer向けのorchestra-contract-validationとorchestra-runtime-security-au
 .agents/orchestra/scripts/には二つのstateless helperがあります。
 
 - snapshot_digest.py: actual Git rootとrevision / working tree / commit rangeのcanonical snapshotを発行
-- git_guard.py: snapshot、scope、operation、preconditionを照合して限定されたlocal Git操作を実行し、postcondition snapshotを返す
+- git_guard.py: snapshot、scope、operationとレビュー済みindex treeを照合して限定されたlocal Git操作を実行し、postcondition snapshotとcommit treeを返す
 
 helperはcallerの身元や権限を証明しません。sandboxとCodex approvalが実際の権限境界です。Git対象、scope、operation、pre/post snapshotを照合して、古い根拠や別repoへの取り違えを防ぎます。
 

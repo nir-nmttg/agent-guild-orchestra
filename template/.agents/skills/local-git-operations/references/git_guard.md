@@ -1,6 +1,6 @@
 # git_guard reference
 
-`git_guard`はruntimeが提供する機械的な境界確認です。呼び出し方や返却schemaは、導入先runtimeの現在のinterfaceを確認して使います。このreferenceはhelperの代わりに判断したり、digestを計算したりしません。
+`git_guard`は機械的な境界確認を提供します。この配布に対応する呼び出し方は以下のとおりです。interfaceが異なる場合は`--help`を確認し、未対応なら停止します。通常の利用のためにhelper全文や配布されていない開発testを読み直す必要はありません。
 
 ## Current template interface
 
@@ -22,7 +22,7 @@ Git writeは、closed allowlistのoperationを一つだけ選び、assignment JS
 git_guard.py apply --operation <allowed-operation> --contract <json-file> [--patch-file <patch-file>]
 ```
 
-同じhelperにはsubcommandを省略するdirect formもあります。operation、contract、patchの優先順位や返却JSONはruntime codeをsource of truthとし、Skillやこのreferenceから別のflag、schema、互換fallbackを推測しません。
+contractには`target_repo_root`、`allowed_operations`、`path_or_ref_scope`、helper出力の`subject_snapshot`を渡します。commitだけはscope内の`message`と、確認済みの`expected_index_tree`も必要です。assignmentのtype/id、空のpostconditions、自己申告のprecondition booleanは不要です。未対応のflagや互換fallbackを推測しません。
 
 Current closed allowlistは`branch_create_and_switch_new`、`rename_origin_unpushed_branch`、`stage_exact_paths_or_hunks`、`unstage_index_only_exact_paths`、`commit_non_amend`です。`git_guard.py`は成功時に`preflight_snapshot`、`postwrite_snapshot`、concise operation evidenceを返し、patch本文やcommit messageを返却しません。
 
@@ -39,7 +39,15 @@ Current closed allowlistは`branch_create_and_switch_new`、`rename_origin_unpus
 
 `git_guard`、sandbox、approval、ユーザー指示が別々に示す権限を足し合わせてscopeを広げません。helperが拒否したら、別コマンドや別pathへ迂回せず停止します。
 
-`working_tree_content` snapshotはcallerが選んだworktree contentとscopeを結び付けます。renameのnew endpointだけをscopeにしたsnapshotもあり得ます。`git_guard`は`--no-renames`でstaged renameを両endpointへ展開し、commit scope内かを確認しますが、indexのstaged hunk compositionは証明しません。commit前に意図したstaged diffをread-onlyで確認し、この限界をresultへ報告します。
+`working_tree_content` snapshotはworktree contentとscopeを結び付けます。commit準備では次のCLI、または`git_guard.index_tree(target_repo_root)`からindexのtree OIDを取得します。
+
+```text
+git_guard.py index-tree --repo <absolute-git-root>
+```
+
+これは`git write-tree`によるGit writeの準備です。worktree内容を変更しませんが、object DBやindex cacheへ書き込むことがあるため、純粋なread-only探索では実行しません。返った`expected_index_tree`とsnapshotの`revision_id`の差分を、helperの安全なGit実行経路（`snapshot_digest.run_git`で`diff --no-ext-diff --no-textconv --ignore-submodules=none <revision_id> <expected_index_tree> -- <owned paths>`）で確認します。変わり得る現在indexだけを見て、別treeを承認したことにしません。
+
+確認したOIDをcontractの`expected_index_tree`へそのまま渡します。guardはindex照合後もその固定treeからcommitを作り、期待する旧HEADを照合してrefを更新します。renameは両endpointをscopeへ含めます。競合で失敗した場合は状況を読み直し、未確認treeへの差し替えや自動rollbackをしません。
 
 ## postflight
 

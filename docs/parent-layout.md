@@ -39,19 +39,21 @@ project Skillはcwdからrepository rootまでの`.agents/skills`、custom agent
 
 ## 実機で確認した範囲
 
-2026-09-05、macOSのCodex Desktop付属CLI **0.153.3**のapp-serverで確認しました。disposableな非Git親と子Git repoを用意し、検証専用の一時user homeにtrust設定を置きました。実利用者のconfig、credential、対象repositoryは変更していません。これは試験の隔離であり、利用手順でCODEX_HOMEを変更する設計ではありません。
+2026-09-06、macOSのCodex Desktop付属CLI **0.153.3**のapp-serverで、maintainer専用の[`scripts/check_codex_parent.py`](../scripts/check_codex_parent.py)を実行しました。scriptは現行`template`を使い捨ての非Git親へinstallし、その下に一時子Git rootを作ります。子には親と衝突する`model`と`agents.enabled`、子専用Skillを置きます。検証専用の一時`CODEX_HOME`にはtrust設定だけを書き、既存authがある場合も`auth.json`をsymlinkで参照します。実利用者のconfigや対象repositoryは変更せず、認証情報とmodelの回答本文を結果JSONへ保存しません。結果は指定pathまたはOSの一時directoryへ出力し、通常実行はmodel callを行いません。
 
 | 確認 | 結果 |
 | --- | --- |
-| trusted親の`config/read` | `gpt-6-astra`、context 1,000,000、effort未固定、agents enabled/max2、multi_agent、experimental context managementを取得 |
-| 親の`skills/list` | 親のcore五つをenabledで検出、Skill parse errorなし |
-| 親のephemeral `thread/start` | Astra、effort未固定、`instructionSources`に親のAGENTS.mdを確認 |
-| 子Git rootの`config/read` | 子に置いた試験用modelを取得し、親の設定layerは含まれなかった |
-| 子Git rootの`skills/list` | 親のcore Skillを検出しなかった |
-| 未trustの親 | project configが無効化された。SkillやAGENTSの読み込みだけをactivation証拠にしてはいけない |
-| named agent | 配布TOMLのname/model/effort/instructionsと構造検証は成功。実呼び出しによるdiscovery、選択model/effort、live permissionの確認は未実施 |
+| trusted親の`config/read` | `gpt-6-astra`、context 1,000,000、effort未固定、agents enabled/max2、`multi_agent`を取得 |
+| 親の`skills/list` | 親projectのcore五つをenabled・parse errorなしで検出。cwd別に判定し、CODEX_HOMEのsystem/user Skillはproject Skillの判定から除外 |
+| 親のephemeral `thread/start` | Astra、effort未固定、`instructionSources`に親fixtureの`AGENTS.md`、`approvalPolicy=never`、sandbox `readOnly`を確認 |
+| 子Git rootの`config/read` | 子に置いた`child-collision-model`と`agents.enabled=false`を取得。親のmodelは子project layerに現れなかった |
+| 子Git rootの`skills/list` | 子専用Skillを検出。子cwdの結果に親のcore Skillがなく、親cwdの結果にも子Skillがないことを確認 |
+| named agent定義 | 配布TOMLの`name/model/model_reasoning_effort/sandbox_mode/instructions`を構造検証し、`adventurer=Luna/max/workspace-write`、`inquisitor=Astra/xhigh/read-only`を確認 |
+| native named spawn（`--live`） | 通信を許可した確認でも、`low`で`adventurer`を要求した1ターン目が45秒の上限に達して停止。`item/completed`の`collabAgentToolCall`、child thread metadataは0件。`xhigh`/`inquisitor`へは進めていないため、実spawn・root effort切替後の子指定維持・child effective permissionは**unknown** |
 
-modelへのlive turnは送っていません。Desktop UI固有のproject/worktree選択、ユーザー既存設定との合成、named agentの実行時の有効権限はこの試験だけでは確認できません。導入先で親から新規taskを作り、実際のmodel/effortとnamed agent利用を確認してください。custom agentのread-only宣言だけをOS上の権限保証にはしません。
+`--live`を付けない通常実行ではmodelへ送信しません。`--live`は`low→adventurer`、`xhigh→inquisitor`の最大2ターンを要求し、各turnのnative `collabAgentToolCall`と`thread/read` metadataが揃ったときだけ`observed`にします。spawnなしを成功扱いせず、retryable error notificationまたはtimeoutは`unknown`（構造化code/typeがあればsanitized evidence付き）、構造化不一致は`failed`としてJSONに残します。今回の通信制限下での初回確認はretryable error notificationで停止し、通信許可後の確認は上記timeoutで停止しました。原因をモデルや設定の不具合と断定せず、追加のlive retryは行っていません。導入先でnamed agentを実行しmetadataを取得するまで、実行時discovery、root effort切替後の子model/effort、child effective permissionは確認済みとはしません。custom agentのread-only宣言だけをOS上の権限保証にはしません。
+
+このmaintainer用実機検証にはPython 3.11以降とホストのCodex CLIが必要です。通常のinstall/syncはDockerだけを使い、このscriptを配布先へ導入しません。再確認時は`python3 scripts/check_codex_parent.py --output /tmp/codex-parent-smoke.json`を実行し、CLIがPATHにない場合は`--codex /absolute/path/to/codex`を指定します。実spawnを試す場合だけ`--live --live-timeout 45`を追加してください。出力の`native_spawn`が`unknown`または`failed`なら、named agentが使えたとは判断しません。
 
 ## 導入・移行の検証
 

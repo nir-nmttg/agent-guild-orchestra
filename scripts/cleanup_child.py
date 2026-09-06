@@ -67,7 +67,7 @@ def execute(parent: Path, child: Path, dry_run: bool) -> dict:
     # Recheck classification immediately before backing up or deleting anything.
     if plan_cleanup(parent, child)[0]["actions"] != plan["actions"] or install.load_manifest(child) != manifest:
         raise install.InstallError("child installation changed during preflight; rerun dry-run")
-    transaction = install.Transaction(child, touched)
+    transaction = install.Transaction(child, touched, recovery_root=parent)
     archive = None
     mutated = []
     archive_root_existed = (parent / install.ARCHIVE_ROOT_REL).exists()
@@ -108,7 +108,7 @@ def execute(parent: Path, child: Path, dry_run: bool) -> dict:
                 except OSError:
                     break
                 directory = directory.parent
-    except Exception:
+    except BaseException:
         transaction.restore(mutated)
         if archive:
             shutil.rmtree(archive)

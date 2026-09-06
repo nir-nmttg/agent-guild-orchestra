@@ -140,7 +140,7 @@ docker info --format '{{.ServerVersion}}' >/dev/null || fail "Docker Engine is u
 
 # The build context contains only the Dockerfile, never repository/user content.
 image_id="$(docker build --quiet "$ROOT/docker")"
-# Transaction backups use the disposable disk layer, not a size-limited tmpfs.
+# Recovery backups live in the mounted parent and survive container removal.
 run_args=(run --rm --network none --user "$(id -u):$(id -g)")
 for ((i = 0; i < ${#mount_paths[@]}; i++)); do
   # Quote CSV fields for --mount so spaces, commas and quotes remain literal.

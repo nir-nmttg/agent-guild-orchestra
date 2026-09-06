@@ -4,4 +4,4 @@ commit分割は、ユーザーがstage/commitを明示し、差分のownerと含
 
 read-onlyでstatus、unstaged/staged/untracked差分、直近履歴、対象scope、検証結果を確認します。owner不明、secret-like差分、未承認path、差分と目的の不一致があれば停止します。
 
-各unitについて`git_guard` preflightとsnapshotを確認してexact path/hunkだけをstageし、non-amend commitを行います。commit前後にindex、working tree、current ref、commit内容、post-snapshotを確認します。push、amend、rebase、reset、変更破棄は行いません。
+各unitについて`git_guard` preflightとsnapshotを確認してexact path/hunkだけをstageします。helperの`index-tree`で固定したtreeの差分を確認し、その`expected_index_tree`を渡してnon-amend commitを行います。commit前後にindex、working tree、current ref、commit tree、post-snapshotを確認します。push、amend、rebase、reset、変更破棄は行いません。

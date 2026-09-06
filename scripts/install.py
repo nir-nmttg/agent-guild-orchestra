@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the Agent Guild Orchestra Codex template into one non-Git parent workspace.
 
-The installer deliberately has no orchestration runtime. It stages a static
+The installer deliberately has no orchestration runtime. It prepares a static
 distribution, validates every destination before writing, records hashes from
 the deployed files, and restores the previous tree if any write fails.
 """
@@ -16,6 +16,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -33,12 +34,18 @@ EXCLUDE_END = "# agent-guild-orchestra:end"
 MANIFEST_REL = Path(".agents/orchestra/install-manifest.json")
 CONFIG_REL = Path(".codex/config.toml")
 ARCHIVE_ROOT_REL = Path(".agent-guild-orchestra-archives")
+RECOVERY_ROOT_REL = Path(".agent-guild-orchestra-recovery")
 EXCLUDE_REL = Path(".git/info/exclude")
 MANIFEST_SCHEMA = 2
 LAYOUT = "guild-parent"
 CONFIG_MODES = {"managed", "user-owned"}
 MANAGED_KINDS = {"file", "agents_block", "exclude_block"}
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+LEGACY_MODES = {
+    Path(".codex/hooks/stop_quality_gate.sh"): 0o755,
+    Path(".agents/skills/create-skill-candidate-from-gap/scripts/validate_skill_candidate.py"): 0o644,
+    Path(".agents/skills/open-subrepo-in-vscode/scripts/open_repositories_in_vscode.py"): 0o644,
+}
 
 
 
@@ -330,10 +337,10 @@ def legacy_paths(target: Path) -> list[Path]:
     for name, hashes in legacy_catalog()["files"].items():
         rel = Path(name)
         path = validate_destination(target, rel)
-        if path.is_file() and current_hash(target, rel, managed_kind(rel)) in hashes:
+        if path.is_file() and not locally_modified_mode(path, rel, legacy=True) and current_hash(target, rel, managed_kind(rel)) in hashes:
             result.append(rel)
     hooks = validate_destination(target, Path(".codex/hooks.json"))
-    if hooks.is_file() and cleaned_legacy_hooks(hooks) is not None:
+    if hooks.is_file() and not locally_modified_mode(hooks, Path(".codex/hooks.json")) and cleaned_legacy_hooks(hooks) is not None:
         result.append(Path(".codex/hooks.json"))
     return sorted(set(result))
 
@@ -363,6 +370,12 @@ def current_hash(target: Path, rel: Path, kind: str) -> str | None:
 
 def desired_mode(rel: Path) -> int:
     return 0o755 if "scripts" in rel.parts and rel.suffix in {".py", ".sh"} else 0o644
+
+
+def locally_modified_mode(path: Path, rel: Path, *, legacy: bool = False) -> bool:
+    # AGENTS is a shared file: only its managed block is owned, never its mode.
+    expected = LEGACY_MODES.get(rel, desired_mode(rel)) if legacy else desired_mode(rel)
+    return rel != Path("AGENTS.md") and path.is_file() and stat.S_IMODE(path.stat().st_mode) != expected
 
 
 def managed_kind(rel: Path) -> str:
@@ -423,31 +436,41 @@ def build_candidate(
 
 
 class Transaction:
-    def __init__(self, target: Path, touched: Iterable[Path]):
+    def __init__(self, target: Path, touched: Iterable[Path], *, recovery_root: Path | None = None):
         self.target = target
-        self.temp = Path(tempfile.mkdtemp(prefix="agent-guild-orchestra-transaction-"))
+        self.retain = False
+        self.backup_root = validate_destination(recovery_root or target, RECOVERY_ROOT_REL)
+        self.backup_root_existed = self.backup_root.exists()
+        self.backup_root.mkdir(mode=0o700, exist_ok=True)
+        self.temp = Path(tempfile.mkdtemp(prefix="transaction-", dir=self.backup_root))
         self.existed: set[Path] = set()
         self.existing_dirs: set[Path] = {Path(".")}
         self.dir_modes: dict[Path, int] = {}
-        for rel in set(touched):
-            for parent in rel.parents:
-                if parent == Path("."):
-                    break
-                if validate_destination(target, parent).is_dir():
-                    self.existing_dirs.add(parent)
-                    self.dir_modes[parent] = (target / parent).stat().st_mode & 0o777
+        touched = sorted(set(touched))
         try:
-            for rel in sorted(set(touched)):
+            for rel in touched:
+                for parent in rel.parents:
+                    if parent == Path("."):
+                        break
+                    if validate_destination(target, parent).is_dir():
+                        self.existing_dirs.add(parent)
+                        self.dir_modes[parent] = stat.S_IMODE((target / parent).stat().st_mode)
                 src = validate_destination(target, rel)
                 if src.exists():
+                    if not src.is_file():
+                        raise InstallError(f"transaction destination must be a regular file: {rel}")
                     self.existed.add(rel)
                     dst = self.temp / rel
                     dst.parent.mkdir(parents=True, exist_ok=True)
-                    if src.is_dir():
-                        shutil.copytree(src, dst)
-                    else:
-                        shutil.copy2(src, dst)
-        except Exception:
+                    shutil.copy2(src, dst)
+            # Recovery is deliberately a cold backup, not an active runtime or
+            # auto-replay journal. It survives Docker --rm on the host parent.
+            (self.temp / "recovery.json").write_text(json.dumps({
+                "target": str(target),
+                "paths": [{"path": str(rel), "existed": rel in self.existed} for rel in touched],
+                "directory_modes": {str(rel): mode for rel, mode in self.dir_modes.items()},
+            }, indent=2) + "\n", encoding="utf-8")
+        except BaseException:
             self.close()
             raise
 
@@ -461,35 +484,56 @@ class Transaction:
             raise InstallError(f"destination appeared during installation: {rel}")
 
     def restore(self, touched: Iterable[Path]) -> None:
-        for rel in sorted(set(touched), key=lambda p: len(p.parts), reverse=True):
-            dst = validate_destination(self.target, rel)
-            if dst.exists():
-                if dst.is_dir():
-                    shutil.rmtree(dst)
-                else:
+        # Set this before any restore work, including a second interruption.
+        self.retain = True
+        errors = []
+        touched = set(touched)
+        for rel in sorted(touched, key=lambda p: (-len(p.parts), str(p))):
+            try:
+                dst = validate_destination(self.target, rel)
+                if rel in self.existed:
+                    src = self.temp / rel
+                    data, mode = src.read_bytes(), stat.S_IMODE(src.stat().st_mode)
+                    if dst.is_file() and dst.read_bytes() == data and stat.S_IMODE(dst.stat().st_mode) == mode:
+                        continue  # A failed atomic write may have changed nothing.
+                    write_atomic(dst, data, mode=mode)
+                elif dst.exists():
+                    if not dst.is_file():
+                        raise InstallError(f"restore destination is no longer a file: {rel}")
                     dst.unlink()
-            if rel in self.existed:
-                src = self.temp / rel
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                if src.is_dir():
-                    shutil.copytree(src, dst)
-                else:
-                    shutil.copy2(src, dst)
+            except Exception as exc:
+                errors.append(f"{rel}: {exc}")
         parents = {parent for rel in set(touched) for parent in rel.parents if parent != Path(".")}
         for rel in sorted(parents, key=lambda p: len(p.parts), reverse=True):
-            path = validate_destination(self.target, rel)
-            if rel not in self.existing_dirs and path.is_dir():
-                try:
+            try:
+                path = validate_destination(self.target, rel)
+                if rel not in self.existing_dirs and path.is_dir():
                     path.rmdir()
-                except OSError:
-                    pass
+            except OSError:
+                pass  # Never remove an unexpected occupant to prune a directory.
+            except InstallError as exc:
+                errors.append(f"{rel}: {exc}")
         for rel, mode in self.dir_modes.items():
-            path = validate_destination(self.target, rel)
-            if path.is_dir() and path.stat().st_mode & 0o777 != mode:
-                path.chmod(mode)
+            try:
+                path = validate_destination(self.target, rel)
+                if path.is_dir() and stat.S_IMODE(path.stat().st_mode) != mode:
+                    path.chmod(mode)
+            except Exception as exc:
+                errors.append(f"{rel}: {exc}")
+        if errors:
+            raise InstallError(f"rollback incomplete; recovery backup retained at {self.temp}: " + "; ".join(errors))
+        self.retain = False
 
     def close(self) -> None:
+        if self.retain:
+            print(f"Recovery backup retained: {self.temp}", file=sys.stderr)
+            return
         shutil.rmtree(self.temp, ignore_errors=True)
+        if not self.backup_root_existed:
+            try:
+                self.backup_root.rmdir()
+            except OSError:
+                pass
 
 
 def archive_legacy(target: Path, rels: list[Path], *, label: str = "v2-to-v3") -> Path:
@@ -512,7 +556,7 @@ def archive_legacy(target: Path, rels: list[Path], *, label: str = "v2-to-v3") -
         metadata = {"created_at": dt.datetime.now(dt.timezone.utc).isoformat(), "paths": [p.as_posix() for p in rels]}
         (archive / "archive.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return archive
-    except Exception:
+    except BaseException:
         shutil.rmtree(archive, ignore_errors=True)
         try:
             if not archive_root_existed:
@@ -531,31 +575,21 @@ def remove_existing(path: Path) -> None:
         path.unlink()
 
 
-def write_atomic(path: Path, data: bytes) -> None:
+def write_atomic(path: Path, data: bytes, *, mode: int | None = None) -> None:
+    if mode is None:
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
+            os.fchmod(handle.fileno(), mode)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
-
-
-def stage_candidate(candidate: dict[Path, bytes]) -> Path:
-    stage = Path(tempfile.mkdtemp(prefix="agent-guild-orchestra-stage-"))
-    try:
-        for rel, data in candidate.items():
-            path = stage / safe_rel(rel)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-        return stage
-    except Exception:
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
 
 
 def deactivate_legacy(root: Path, rels: list[Path], transaction: Transaction, mutated: set[Path]) -> None:
@@ -733,14 +767,15 @@ def plan_install(
             previous_hash = previous.get("sha256")
             previous_kind = previous.get("kind")
             actual_hash = current_hash(target, rel, str(previous_kind))
+            mode_changed = locally_modified_mode(destination, rel)
             if actual_hash == desired_hash:
                 # A manual edit may have brought the destination exactly to
                 # the new distribution. Adopt that converged state before
                 # checking whether both sides diverged from the old baseline.
                 action = "keep"
-            elif actual_hash != previous_hash and desired_hash != previous_hash:
+            elif (actual_hash != previous_hash or mode_changed) and desired_hash != previous_hash:
                 raise InstallError(f"managed file changed locally and in distribution: {rel}")
-            elif actual_hash != previous_hash and desired_hash == previous_hash:
+            elif actual_hash != previous_hash or mode_changed:
                 action = "preserve-local"
             else:
                 action = "update"
@@ -765,7 +800,8 @@ def plan_install(
         if rel in candidate_paths or not isinstance(old, dict):
             continue
         actual_hash = current_hash(target, rel, str(old.get("kind")))
-        action = "remove" if actual_hash == old.get("sha256") else "preserve-local-removed"
+        path = validate_destination(target, rel)
+        action = "remove" if actual_hash == old.get("sha256") and not locally_modified_mode(path, rel) else "preserve-local-removed"
         actions.append({"action": action, "path": rel.as_posix()})
     result_manifest: dict[str, object] = {
         "schema": MANIFEST_SCHEMA,
@@ -853,30 +889,26 @@ def execute(args: argparse.Namespace) -> int:
         return 0
 
     changed = {Path(item["path"]) for item in actions if item["action"] in {"create", "update", "remove", "replace-legacy"}}
-    target_legacy_rels = set(legacy_rels) if migration_root == target else set()
-    touched = set(changed) | target_legacy_rels
-    stage = stage_candidate(candidate)
-    try:
-        transaction = Transaction(target, touched)
-    except Exception:
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
+    touched = changed | set(legacy_rels)
+    if not touched:
+        plan["archive"] = None
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0
+    transaction = Transaction(target, touched)
     archive: Path | None = None
     archive_root_existed = (target / ARCHIVE_ROOT_REL).exists()
     mutated: set[Path] = set()
     try:
-        # Re-plan before the first write: staging must not conceal destination edits.
+        # Re-plan before the first write using the already prepared candidate bytes.
         repeated = plan_install(args)
         repeated[2]["installed_at"] = result_manifest["installed_at"]
         if repeated[2:6] != (result_manifest, candidate, actions, legacy_rels):
             raise InstallError("installation changed during preflight; rerun dry-run")
         if legacy_rels:
-            assert migration_root is not None
-            archive = archive_legacy(migration_root, legacy_rels)
-            deactivate_legacy(migration_root, legacy_rels, transaction, mutated)
+            archive = archive_legacy(target, legacy_rels)
+            deactivate_legacy(target, legacy_rels, transaction, mutated)
         actions_by_path = {Path(item["path"]): item["action"] for item in actions}
         for rel, desired in sorted(candidate.items()):
-            desired = (stage / rel).read_bytes()
             action = actions_by_path[rel]
             destination = validate_destination(target, rel)
             if action == "preserve-local":
@@ -892,10 +924,8 @@ def execute(args: argparse.Namespace) -> int:
                 write_atomic(destination, replace_block(existing, managed).encode())
                 block = extract_block(destination.read_text(encoding="utf-8"))
                 assert block is not None
-                os.chmod(destination, desired_mode(rel))
             else:
-                write_atomic(destination, desired)
-                os.chmod(destination, desired_mode(rel))
+                write_atomic(destination, desired, mode=desired_mode(rel))
         for item in actions:
             if item["action"] == "remove":
                 rel = Path(item["path"])
@@ -917,7 +947,7 @@ def execute(args: argparse.Namespace) -> int:
                 validate_destination(target, MANIFEST_REL),
                 (json.dumps(result_manifest, ensure_ascii=False, indent=2) + "\n").encode(),
             )
-    except Exception:
+    except BaseException:
         transaction.restore(mutated)
         if archive is not None:
             shutil.rmtree(archive, ignore_errors=True)
@@ -929,7 +959,6 @@ def execute(args: argparse.Namespace) -> int:
         raise
     finally:
         transaction.close()
-        shutil.rmtree(stage, ignore_errors=True)
     plan["archive"] = str(archive) if archive else None
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     return 0

@@ -9,7 +9,7 @@
 1. `astra_only`: Astra/highのRootがtaskを直接実装します。workerは記録しません。risk taskだけ独立Astra/xhigh reviewを付けます。
 2. `astra_luna`: Astra/highのRootが必要と判断した時だけLuna/max workerへ委譲します。worker数はtaskごとに可変で、同じtaskで独立workerを複数記録できます。risk taskのreviewは独立Astra/xhighです。
 
-各taskの`features`、`risk`、`review_required`はmanifestで先に固定します。実際にworkerやreviewを呼んだか、retryしたか、stageの順序はrecordへそのまま残し、構成から固定しません。Rootのuser model/effort overrideは`provenance.root_override`とRoot stageのeffective `model` / `reasoning_effort`へ記録します。Luna workerと独立reviewのmodel/effortは固定します。
+各taskの`features`、`risk`、`review_required`はmanifestで先に固定します。実際にworkerやreviewを呼んだか、retryしたか、stageの順序はrecordへそのまま残し、構成から固定しません。Rootのuser effort overrideは`provenance.root_override`とRoot stageのeffective `model` / `reasoning_effort`へ記録します。Root modelは比較群のmanifest指定（Astra）から変更せず、Luna workerと独立reviewのmodel/effortも固定します。一つのrecord内ではRoot model/effort条件をretry間でも変えず、変更する場合は別のrun/recordとして扱います。summaryはeffective Root model/effortごとにgroupを分け、異なるRoot effort条件を混ぜません。
 
 ## Pilotとholdout
 
@@ -21,7 +21,7 @@
 
 ## Recordとwhole-task accounting
 
-JSONL一行が一つのtask/strategy結果です。既存の`task_id`、`strategy`、`split`、`accepted`、`task_input`、`acceptance_evidence`、`provenance`を保持し、`grade_refs`を追加します。`attempts`は1から連番で、各attemptは`accepted`、wall timeとsource、実行した`stages`を持ちます。再試行前のattemptはfailed stageと`failure_evidence`を含み、最終attemptの結果はrecordの`accepted`と一致させます。
+JSONL一行が一つのtask/strategy結果です。既存の`task_id`、`strategy`、`split`、`accepted`、`task_input`、`acceptance_evidence`、`provenance`を保持し、`grade_refs`を追加します。`attempts`は1から連番で、各attemptはrubric outcomeとしての`accepted`、wall timeとsource、実行した`stages`を持ちます。`accepted=false`は、failed stageと`failure_evidence`を伴う実行エラー、または全stageがcompletedでもrubricを満たさない品質失敗のどちらも記録できます。retry前の品質失敗も分母から除かず、最終attemptの結果はrecordの`accepted`と一致させます。
 
 各stageは`sequence`、unique `invocation_id`、`role`（root/worker/review）、effective model/effort、status、failure evidence、usage、elapsed time、reproducible `evidence_refs`を持ちます。sequenceは記録された実行順を表します。Astra-onlyのworkerは拒否されますが、Astra+Lunaのworker数は0以上です。taskの`review_required`がtrueなら最終attemptへreviewを含めます。parallelismやretryの数をこのvalidatorが知らないため、実際の全invocationを記録する責任はrunner/Rootに残ります。
 
@@ -34,6 +34,6 @@ python3 scripts/model_selection_eval.py --validate-results /path/to/results.json
 python3 scripts/model_selection_eval.py --summarize /path/to/results.jsonl
 ~~~
 
-summaryはtask分母を保ったaccepted count、attempt/stage/review/worker count、source付きtoken、Codex usage、API cost、wall-timeを出します。統計的優越、非劣性、費用削減を自動で主張しません。pilot/holdoutの比較には、同じverification、外部grade、実際のpermission/model/fresh-context event、全retry/failure、適切なhost usage evidenceが必要です。
+summaryはeffective Root model/effortごとにgroupを分け、task分母を保ったaccepted count、attempt/stage/review/worker count、source付きtoken、Codex usage、API cost、wall-timeを出します。統計的優越、非劣性、費用削減を自動で主張しません。pilot/holdoutの比較には、同じverification、外部grade、実際のpermission/model/fresh-context event、全retry/failure、適切なhost usage evidenceが必要です。
 
-`scripts/validation/fixtures/model_eval_offline.jsonl`はsyntheticと明記したpilot fixtureです。direct/no-review、adaptive no-worker、material review、複数worker、retry、wrong role/model/order、duplicate invocation、missing failure evidence、root override、observed provenanceのvalidator経路を確認します。これは実benchmarkではなく、品質、host quota、API費用、savingsの証拠ではありません。
+`scripts/validation/fixtures/model_eval_offline.jsonl`はsyntheticと明記したpilot fixtureです。direct/no-review、adaptive no-worker、material review、複数worker、retry前の品質失敗、最終品質失敗、wrong role/model/order、duplicate invocation、missing failure evidence、Root effort override、observed provenanceのvalidator経路を確認します。これは実benchmarkではなく、品質、host quota、API費用、savingsの証拠ではありません。
