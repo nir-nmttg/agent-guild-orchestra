@@ -25,17 +25,17 @@ Rootはgpt-6-astraで動き、推論レベルはプロジェクトで固定せ�
 
 ## 配置と導入
 
-既存の非Git親ディレクトリを指定します。Gitの作業ツリー内のディレクトリは導入先にできません。
+既存の非Git親ディレクトリを指定します。Gitの作業ツリー内のディレクトリは導入先にできません。以下の`/absolute/path/to/guild-root`は、実際の導入先の絶対パスに置き換えてください。`guild-root`や子リポジトリの名前は例であり、任意の名前を使えます。
 
 ```text
-asked-root/                         ← 設定の導入先・Codexの起動場所
+guild-root/                         ← 設定の導入先・Codexの起動場所
 ├── AGENTS.md
 ├── .codex/                         ← config.toml・名前付きエージェント
 ├── .agents/                        ← Skills・補助スクリプト・導入マニフェスト
 └── repositories/
-    ├── asked_backend/              ← 実Gitルート
-    ├── asked_compose/              ← 実Gitルート
-    └── asked_frontend/             ← 実Gitルート
+    ├── backend/                    ← 実Gitルート
+    ├── infrastructure/             ← 実Gitルート
+    └── frontend/                   ← 実Gitルート
 ```
 
 ~~~bash
@@ -43,8 +43,8 @@ git clone https://github.com/nir-nmttg/agent-guild-orchestra.git
 cd agent-guild-orchestra
 make validate
 
-./scripts/install.sh --target /Users/nir-nmttg/Projects/achromono/asked-root --dry-run
-./scripts/install.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
+./scripts/install.sh --target "/absolute/path/to/guild-root" --dry-run
+./scripts/install.sh --target "/absolute/path/to/guild-root"
 ~~~
 
 子リポジトリへAGENTS.md、.codex、.agents、マニフェストを追加しません。子の既存ファイル、Git index、Git設定、.gitignore、.git/info/excludeも変更しません。設定の配置場所を示す`guild_root`と、コード変更・Git操作の`target_repo_root`を分けます。
@@ -55,13 +55,13 @@ make validate
 
 ## Codexでの起動
 
-**Codexで非Git親のasked-rootを開いて信頼し、その親を作業場所とする新しいローカルタスクを開始してください。** CLIの場合は次の形です。
+**Codexで導入先の非Git親ディレクトリ（例：guild-root）を開いて信頼し、その親を作業場所とする新しいローカルタスクを開始してください。** CLIの場合は次の形です。
 
 ~~~bash
-codex --cd /Users/nir-nmttg/Projects/achromono/asked-root
+codex --cd "/absolute/path/to/guild-root"
 ~~~
 
-依頼には「`repositories/asked_backend`の実Gitルートを対象に変更」のように対象を明示します。セッションの基点は親に保ち、子でのコマンドは作業ディレクトリや`git -C`で指定します。子Gitルートを直接開くと親の設定・Skill探索がGit境界で止まるため、この構成の起動方法にはしません。
+依頼には「`repositories/backend`の実Gitルートを対象に変更」のように対象を明示します。セッションの基点は親に保ち、子でのコマンドは作業ディレクトリや`git -C`で指定します。子Gitルートを直接開くと親の設定・Skill探索がGit境界で止まるため、この構成の起動方法にはしません。
 
 独自設定を保持した場合は、Astraモデル、1Mコンテキスト、エージェントの有効化と同時実行上限2、`multi_agent`、実験的コンテキスト管理の設定を手動で整合させます。Guildmasterの推論レベルは利用者がタスク/セッションで選びます。子のAGENTS指示はコード変更前に読み、既存の子設定・Skill・名前付きエージェントとの競合を確認します。インストーラーは該当パスを`child_overrides`へ表示し、子設定を自動統合しません。
 
@@ -72,8 +72,8 @@ Codex 0.153.3で親の有効設定、AGENTS.md、五つのSkillの読み込み�
 ~~~bash
 git pull --ff-only
 make validate
-./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root --dry-run
-./scripts/sync.sh --target /Users/nir-nmttg/Projects/achromono/asked-root
+./scripts/sync.sh --target "/absolute/path/to/guild-root" --dry-run
+./scripts/sync.sh --target "/absolute/path/to/guild-root"
 ~~~
 
 配布元だけの変更は更新し、導入先だけの変更は保持します。権限だけの変更もローカル変更として扱い、同じ管理対象ファイルが両方で変わると書き込み前に衝突として停止します。共有AGENTS.mdの既存権限は維持します。候補の事前検証・変更対象のバックアップ・各ファイルのアトミック置換を行い、途中の例外やCtrl-Cでは復元します。復元にも失敗した場合は、親の`.agent-guild-orchestra-recovery/transaction-.../`へバックアップを残し、場所を報告します。シンボリックリンクを経由する管理パスは拒否します。
@@ -94,7 +94,7 @@ make validate
 
 ~~~bash
 ./scripts/install.sh --list-skills
-./scripts/install.sh --target /absolute/path/to/asked-root \
+./scripts/install.sh --target "/absolute/path/to/guild-root" \
   --with-skill create-skill-candidate-from-gap
 ~~~
 
