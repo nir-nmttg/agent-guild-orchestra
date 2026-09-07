@@ -57,20 +57,36 @@ def validate_required_paths() -> None:
 def validate_codex_config() -> None:
     with (ROOT / "template/.codex/config.toml").open("rb") as handle:
         config = tomllib.load(handle)
-    require(set(config) == {"model", "model_context_window", "agents", "features"}, "config must keep only distribution-owned settings")
+    require(set(config) == {"model", "model_context_window", "model_auto_compact_token_limit", "agents", "features"}, "config must keep only distribution-owned settings")
     require(config.get("model") == "gpt-6-astra", "root model must be gpt-6-astra")
     require(config.get("model_context_window") == 1_000_000, "model context window must default to 1,000,000 tokens")
-    require("model_auto_compact_token_limit" not in config, "v3 must not pin the auto-compact threshold")
+    require(config.get("model_auto_compact_token_limit") == 900_000, "auto-compact threshold must default to 900,000 tokens")
     agents_config = config.get("agents")
     require(isinstance(agents_config, dict), "config needs an [agents] table")
-    require(set(agents_config) == {"enabled", "max_concurrent_threads_per_session"}, "agents config has unrelated settings")
+    require(
+        set(agents_config) == {
+            "enabled", "max_concurrent_threads_per_session",
+            "default_subagent_model", "default_subagent_reasoning_effort",
+        },
+        "agents config has unrelated settings",
+    )
     require(agents_config.get("enabled") is True, "agents.enabled must be true")
     require(agents_config.get("max_concurrent_threads_per_session") == 2, "max concurrent subagent threads must be 2")
+    require(agents_config.get("default_subagent_model") == "gpt-5.6-luna", "default subagent model must be Luna")
+    require(agents_config.get("default_subagent_reasoning_effort") == "max", "default subagent reasoning effort must be max")
     features_config = config.get("features")
     require(
         isinstance(features_config, dict)
-        and features_config == {"multi_agent": True, "context_management": {"experimental_mode": True}},
-        "multi-agent and experimental context-management features must be enabled explicitly",
+        and features_config == {
+            "multi_agent": True,
+            "multi_agent_v2": {
+                "min_wait_timeout_ms": 300_000,
+                "default_wait_timeout_ms": 300_000,
+                "max_wait_timeout_ms": 3_600_000,
+            },
+            "context_management": {"experimental_mode": True},
+        },
+        "features must enable multi-agent and experimental context management with 5-minute minimum/default and 1-hour maximum v2 waits",
     )
     for name, (model, effort, sandbox) in AGENTS.items():
         path = ROOT / "template/.codex/agents" / f"{name}.toml"
@@ -81,6 +97,8 @@ def validate_codex_config() -> None:
         require(isinstance(value.get("developer_instructions"), str) and value["developer_instructions"].strip(), f"{name}.toml needs developer_instructions")
         require(value.get("model") == model and value.get("model_reasoning_effort") == effort, f"{name}.toml model pair mismatch")
         require(value.get("sandbox_mode") == sandbox, f"{name}.toml sandbox mismatch")
+        require(value.get("model_context_window") == 1_000_000, f"{name}.toml context window must be 1,000,000 tokens")
+        require(value.get("model_auto_compact_token_limit") == 900_000, f"{name}.toml auto-compact threshold must be 900,000 tokens")
 
 
 def validate_no_retired_runtime() -> None:
