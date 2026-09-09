@@ -27,6 +27,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
     "adventurer": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "workspace-write"},
+    "scholar": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "read-only"},
     "inquisitor": {"model": "gpt-6-astra", "effort": "xhigh", "sandbox": "read-only"},
 }
 
@@ -151,7 +152,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target-repo-root", default=str(REPO_ROOT), help="template/を含むGitリポジトリ。")
     parser.add_argument("--codex", default=os.environ.get("CODEX_BIN") or shutil.which("codex") or "codex", help="Codex実行ファイルのパス（CODEX_BINでも指定可能）。")
     parser.add_argument("--output", help="結果JSONのパス（既定: OSの一時ディレクトリ/codex-parent-smoke-*.json）。")
-    parser.add_argument("--live", action="store_true", help="時間制限付きで、名前付きエージェントを実際に呼び出す最大2ターンを要求。")
+    parser.add_argument("--live", action="store_true", help="時間制限付きで、名前付きエージェントを実際に呼び出す最大3ターンを要求。")
     parser.add_argument("--live-timeout", type=float, default=45.0, help="実呼び出しの1ターン当たりの制限秒数（既定: 45）。")
     parser.add_argument("--keep-fixture", action="store_true", help="検証用の親・子を残す。一時的な認証設定ディレクトリは削除する。")
     return parser.parse_args(argv)
@@ -314,7 +315,7 @@ def static_probe(rpc: Rpc, parent: Path, child: Path) -> tuple[dict[str, Any], s
     checks: dict[str, Any] = {}
     parent_cfg = config_view(result_of(rpc.call("config/read", {"cwd": str(parent), "includeLayers": True}), "config/read"))
     child_cfg = config_view(result_of(rpc.call("config/read", {"cwd": str(child), "includeLayers": True}), "config/read"))
-    expected_parent = {"model": "gpt-6-astra", "contextWindow": 1_000_000, "reasoningEffort": None, "agentsEnabled": True, "maxThreads": 2, "multiAgent": True}
+    expected_parent = {"model": "gpt-6-astra", "contextWindow": 1_000_000, "reasoningEffort": None, "agentsEnabled": True, "maxThreads": 3, "multiAgent": True}
     checks["parent_config"] = observed(parent_cfg) if parent_cfg == expected_parent else failed("parent_config_mismatch", parent_cfg)
     checks["child_config_collision"] = observed(child_cfg) if child_cfg["model"] == "child-collision-model" and child_cfg["agentsEnabled"] is False else failed("child_config_mismatch", child_cfg)
 
@@ -377,7 +378,7 @@ def live_probe(
     turns: list[dict[str, Any]] = []
     root_reads: list[dict[str, Any]] = []
     blocked: str | None = None
-    for index, (effort, agent) in enumerate((("low", "adventurer"), ("xhigh", "inquisitor")), 1):
+    for index, (effort, agent) in enumerate((("low", "adventurer"), ("xhigh", "scholar"), ("xhigh", "inquisitor")), 1):
         prompt = (
             f"Codex標準のエージェント起動を確認します。名前付きエージェント`{agent}`を選び、標準の協調機能でちょうど1回起動してください。"
             f"そのエージェントに親={parent}と子Gitルート={child}を読み取り専用で調べさせてください。"
@@ -438,9 +439,12 @@ def live_probe(
 
     expected_events: dict[str, Any] = {}
     for agent, want in EXPECTED.items():
-        matches = [event for event in spawns if event.get("model") == want["model"] and event.get("reasoningEffort") == want["effort"]]
-        named = [item for item in metadata if item.get("parentThreadId") == parent_thread and (item.get("agentNickname") == agent or item.get("agentRole") == agent) and item.get("model") == want["model"] and item.get("reasoningEffort") == want["effort"]]
-        status = "observed" if len(matches) == 1 and named else "unknown" if blocked else "failed"
+        named = [item for item in metadata if item.get("parentThreadId") == parent_thread and (item.get("agentRole") or item.get("agentNickname")) == agent and item.get("model") == want["model"] and item.get("reasoningEffort") == want["effort"]]
+        # Adventurer and Scholar share a model/effort pair. Bind each event to
+        # its named child instead of counting the other role's Luna spawn.
+        named_ids = {item["id"] for item in named if isinstance(item.get("id"), str)}
+        matches = [event for event in spawns if event.get("model") == want["model"] and event.get("reasoningEffort") == want["effort"] and len(event.get("receiverThreadIds") or []) == 1 and event["receiverThreadIds"][0] in named_ids]
+        status = "observed" if len(matches) == 1 and len(named) == 1 else "unknown" if blocked else "failed"
         expected_events[agent] = {"status": status, "spawnEventCount": len(matches), "childMetadataMatches": len(named)}
     evidence = {"turns": turns, "rootThreadReads": root_reads, "spawnEvents": spawns, "childThreadMetadata": metadata, "expected": expected_events, "requested": True}
     child_permissions = [
@@ -458,7 +462,7 @@ def live_probe(
     if blocked:
         evidence["blocked"] = True
         return unknown(f"bounded live probe stopped: {blocked}", evidence), permission_result
-    if all(item["status"] == "observed" for item in expected_events.values()) and all(item["status"] == "observed" for item in root_reads) and len(spawns) == 2 and len(metadata) == 2:
+    if all(item["status"] == "observed" for item in expected_events.values()) and all(item["status"] == "observed" for item in root_reads) and len(spawns) == len(EXPECTED) and len(metadata) == len(EXPECTED):
         return observed(evidence), permission_result
     if any(item["status"] == "unknown" for item in root_reads):
         return unknown("parent thread/read metadata unavailable", evidence), permission_result

@@ -20,6 +20,7 @@ MAINTAINER_SKILLS = {"orchestra-contract-validation", "orchestra-runtime-securit
 OPTIONAL_SKILLS = {"create-skill-candidate-from-gap", "open-subrepo-in-vscode"}
 AGENTS = {
     "adventurer": ("gpt-5.6-luna", "max", "workspace-write"),
+    "scholar": ("gpt-5.6-luna", "max", "read-only"),
     "inquisitor": ("gpt-6-astra", "xhigh", "read-only"),
 }
 
@@ -41,6 +42,7 @@ def validate_required_paths() -> None:
         "template/AGENTS.md",
         "template/.codex/config.toml",
         "template/.codex/agents/adventurer.toml",
+        "template/.codex/agents/scholar.toml",
         "template/.codex/agents/inquisitor.toml",
         "template/.agents/orchestra/scripts/snapshot_digest.py",
         "template/.agents/orchestra/scripts/git_guard.py",
@@ -48,7 +50,7 @@ def validate_required_paths() -> None:
     for rel in required:
         require((ROOT / rel).is_file(), f"required distribution file is missing: {rel}")
     agent_files = {path.stem for path in (ROOT / "template/.codex/agents").glob("*.toml")}
-    require(agent_files == set(AGENTS), f"template must contain only Adventurer and Inquisitor agents: {agent_files}")
+    require(agent_files == set(AGENTS), f"template must contain only Adventurer, Scholar and Inquisitor agents: {agent_files}")
     require(directories(ROOT / "template/.agents/skills") == CORE_SKILLS, "default skill set is not the v3 core five")
     require(directories(ROOT / "maintainer-skills") == MAINTAINER_SKILLS, "maintainer skill package set is incorrect")
     require(directories(ROOT / "optional-skills") == OPTIONAL_SKILLS, "optional skill package set is incorrect")
@@ -71,7 +73,7 @@ def validate_codex_config() -> None:
         "agents config has unrelated settings",
     )
     require(agents_config.get("enabled") is True, "agents.enabled must be true")
-    require(agents_config.get("max_concurrent_threads_per_session") == 2, "max concurrent subagent threads must be 2")
+    require(agents_config.get("max_concurrent_threads_per_session") == 3, "max concurrent subagent threads must be 3")
     require(agents_config.get("default_subagent_model") == "gpt-5.6-luna", "default subagent model must be Luna")
     require(agents_config.get("default_subagent_reasoning_effort") == "max", "default subagent reasoning effort must be max")
     features_config = config.get("features")
@@ -97,6 +99,7 @@ def validate_codex_config() -> None:
         require(isinstance(value.get("developer_instructions"), str) and value["developer_instructions"].strip(), f"{name}.toml needs developer_instructions")
         require(value.get("model") == model and value.get("model_reasoning_effort") == effort, f"{name}.toml model pair mismatch")
         require(value.get("sandbox_mode") == sandbox, f"{name}.toml sandbox mismatch")
+        require(value.get("agents") == {"enabled": False}, f"{name}.toml must disable nested agents")
         require(value.get("model_context_window") == 1_000_000, f"{name}.toml context window must be 1,000,000 tokens")
         require(value.get("model_auto_compact_token_limit") == 900_000, f"{name}.toml auto-compact threshold must be 900,000 tokens")
 

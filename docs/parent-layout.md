@@ -9,7 +9,8 @@
   │       ↓ 親を開いたCodexセッションが読み込む
   │   Guildmaster: Astra（推論レベルは利用者が選択）
   │       ├── Adventurer: Luna / max
-  │       └── Inquisitor: Astra / xhigh
+  │       ├── Scholar: Luna / max / read-only
+  │       └── Inquisitor: Astra / xhigh / read-only
   │
   └── repositories/                ← 通常の導入・更新では読み取り専用でマウント
           ├── backend/ .git        ← target_repo_rootを明示してコード・Git操作
@@ -43,15 +44,16 @@ AGENTS.mdはプロジェクトルートからcwdまで探索し、プロジェ�
 
 | 確認 | 結果 |
 | --- | --- |
-| 信頼済み親の`config/read` | `gpt-6-astra`、コンテキスト 1,000,000、推論レベル未固定、エージェント有効・同時実行上限2、`multi_agent`を取得 |
+| 信頼済み親の`config/read`（2026-09-06の観測） | `gpt-6-astra`、コンテキスト 1,000,000、推論レベル未固定、エージェント有効・同時実行上限2、`multi_agent`を取得（観測時の値） |
+| 現行配布設定（変更後、実機未確認） | エージェント有効・同時実行上限3を設定 |
 | 親の`skills/list` | 親プロジェクトの標準五つを有効・解析エラーなしで検出。cwd別に判定し、`CODEX_HOME`のシステム用・ユーザー用SkillはプロジェクトSkillの判定から除外 |
 | 親の一時的な`thread/start` | Astra、推論レベル未固定、`instructionSources`に親フィクスチャの`AGENTS.md`、`approvalPolicy=never`、サンドボックス `readOnly`を確認 |
 | 子Gitルートの`config/read` | 子に置いた`child-collision-model`と`agents.enabled=false`を取得。親のモデルは子プロジェクト層に現れなかった |
 | 子Gitルートの`skills/list` | 子専用Skillを検出。子cwdの結果に親の標準Skillがなく、親cwdの結果にも子Skillがないことを確認 |
-| 名前付きエージェント定義 | 配布TOMLの`name/model/model_reasoning_effort/sandbox_mode/instructions`を構造検証し、`adventurer=Luna/max/workspace-write`、`inquisitor=Astra/xhigh/read-only`を確認 |
-| 名前付きエージェントの実起動（`--live`） | 通信を許可した確認でも、`low`で`adventurer`を要求した1ターン目が45秒の上限に達して停止。`item/completed`の`collabAgentToolCall`、子スレッドのメタデータは0件。`xhigh`/`inquisitor`へは進めていないため、実起動・メインセッションの推論レベル切替後の子指定維持・子の実効権限は**unknown** |
+| 名前付きエージェント定義 | 配布TOMLの`name/model/model_reasoning_effort/sandbox_mode/instructions`を構造検証し、既存確認は`adventurer=Luna/max/workspace-write`、`inquisitor=Astra/xhigh/read-only`。追加した`scholar=Luna/max/read-only`は定義済みだが実機未確認 |
+| 名前付きエージェントの実起動（`--live`） | 通信を許可した既存確認でも、`low`で`adventurer`を要求した1ターン目が45秒の上限に達して停止。`item/completed`の`collabAgentToolCall`、子スレッドのメタデータは0件。`xhigh`/`inquisitor`へは進めておらず、`scholar`も未実行のため、実起動・メインセッションの推論レベル切替後の子指定維持・子の実効権限は**unknown** |
 
-`--live`を付けない通常実行ではモデルへ送信しません。`--live`は`low→adventurer`、`xhigh→inquisitor`の最大2ターンを要求し、各ターンのネイティブな`collabAgentToolCall`と`thread/read`のメタデータが揃ったときだけ`observed`にします。子エージェントの起動がない場合を成功扱いせず、再試行可能なエラー通知またはタイムアウトは`unknown`（構造化されたコード・種別があれば機微情報を除いた証拠付き）、構造化不一致は`failed`としてJSONに残します。今回の通信制限下での初回確認は再試行可能なエラー通知で停止し、通信許可後の確認は上記のタイムアウトで停止しました。原因をモデルや設定の不具合と断定せず、実呼び出しの追加再試行は行っていません。導入先で名前付きエージェントを実行しメタデータを取得するまで、実行時のエージェント検出、メインセッションの推論レベル切替後の子モデル/推論レベル、子の実効権限は確認済みとはしません。カスタムエージェントの読み取り専用宣言だけをOS上の権限保証にはしません。
+`--live`を付けない通常実行ではモデルへ送信しません。probeは、`low→adventurer`、`xhigh→scholar`、`xhigh→inquisitor`の最大3ターンをこの順で要求します。追加したScholarの実機起動はこの変更時点で未確認です。各ターンのネイティブな`collabAgentToolCall`と`thread/read`のメタデータが揃ったときだけ`observed`にします。子エージェントの起動がない場合を成功扱いせず、再試行可能なエラー通知またはタイムアウトは`unknown`（構造化されたコード・種別があれば機微情報を除いた証拠付き）、構造化不一致は`failed`としてJSONに残します。過去の通信制限下での初回確認は再試行可能なエラー通知で停止し、通信許可後の確認は上記の`adventurer`タイムアウトで停止しました。原因をモデルや設定の不具合と断定せず、実呼び出しの追加再試行は行っていません。導入先で名前付きエージェントを実行しメタデータを取得するまで、実行時のエージェント検出、メインセッションの推論レベル切替後の子モデル/推論レベル、子の実効権限は確認済みとはしません。カスタムエージェントの読み取り専用宣言だけをOS上の権限保証にはしません。
 
 この保守担当者用実機検証にはPython 3.11以降とホストのCodex CLIが必要です。通常の導入・更新はDockerだけを使い、このスクリプトを配布先へ導入しません。再確認時は`python3 scripts/check_codex_parent.py --output /tmp/codex-parent-smoke.json`を実行し、CLIがPATHにない場合は`--codex /absolute/path/to/codex`を指定します。実起動を試す場合だけ`--live --live-timeout 45`を追加してください。出力の`native_spawn`が`unknown`または`failed`なら、名前付きエージェントが使えたとは判断しません。
 

@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -131,6 +132,30 @@ class ParentInstallTests(unittest.TestCase):
         self.assertEqual(agents.stat().st_mode & 0o777, 0o600)
         with self.assertRaisesRegex(install.InstallError, "collision"):
             self.run_install("--config-mode", "managed")
+        self.assert_children_unchanged()
+
+    def test_update_adds_scholar_and_three_slots_without_touching_children(self):
+        source = self.base / "previous-template"
+        shutil.copytree(ROOT / "template", source)
+        (source / ".codex/agents/scholar.toml").unlink()
+        config = source / ".codex/config.toml"
+        config.write_text(config.read_text().replace(
+            "max_concurrent_threads_per_session = 3",
+            "max_concurrent_threads_per_session = 2",
+        ))
+        self.run_install("--source", str(source), "--allow-non-default-source")
+        before = tree(self.parent)
+        dry = self.run_install("--dry-run")
+        self.assertEqual(tree(self.parent), before)
+        self.assertIn({"action": "create", "path": ".codex/agents/scholar.toml"}, dry["actions"])
+        self.run_install()
+        scholar = self.parent / ".codex/agents/scholar.toml"
+        self.assertEqual(scholar.read_bytes(), (ROOT / "template/.codex/agents/scholar.toml").read_bytes())
+        installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
+        self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 3)
+        self.assertIn(".codex/agents/scholar.toml", install.load_manifest(self.parent)["files"])
+        with patch.object(install, "write_atomic", side_effect=AssertionError("no-op wrote a file")):
+            self.run_install()
         self.assert_children_unchanged()
 
     def test_update_preserves_local_edits_and_rejects_two_sided_changes(self):

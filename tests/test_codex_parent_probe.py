@@ -111,6 +111,8 @@ class ProbeHelpersTests(unittest.TestCase):
                 self.messages = []
                 self.current_effort = None
                 self.spawn_count = 0
+                self.roles = ["adventurer", "scholar", "inquisitor"]
+                self.metadata_roles = {}
 
             def call(self, method, params, timeout=20):
                 if method == "turn/start":
@@ -120,13 +122,14 @@ class ProbeHelpersTests(unittest.TestCase):
                     thread_id = params["threadId"]
                     if thread_id == "parent":
                         return {"result": {"thread": {"model": "gpt-6-astra", "reasoningEffort": self.current_effort, "cwd": "parent"}}}
-                    agent = "adventurer" if thread_id == "child-adventurer" else "inquisitor"
+                    agent = thread_id.removeprefix("child-")
                     want = probe.EXPECTED[agent]
-                    return {"result": {"thread": {"id": thread_id, "parentThreadId": "parent", "agentNickname": agent, "agentRole": agent, "model": want["model"], "reasoningEffort": want["effort"], "cwd": "child"}}}
+                    role = self.metadata_roles.get(agent, agent)
+                    return {"result": {"thread": {"id": thread_id, "parentThreadId": "parent", "agentNickname": agent, "agentRole": role, "model": want["model"], "reasoningEffort": want["effort"], "cwd": "child"}}}
                 raise AssertionError(method)
 
             def wait_turn(self, thread_id, timeout):
-                agent = "adventurer" if self.spawn_count == 0 else "inquisitor"
+                agent = self.roles[self.spawn_count]
                 want = probe.EXPECTED[agent]
                 child_id = f"child-{agent}"
                 self.messages.append({"method": "item/completed", "params": {"threadId": "parent", "item": {"type": "collabAgentToolCall", "tool": "spawnAgent", "model": want["model"], "reasoningEffort": want["effort"], "receiverThreadIds": [child_id], "agentsStates": {}, "status": "completed"}}})
@@ -135,5 +138,15 @@ class ProbeHelpersTests(unittest.TestCase):
 
         native, permission = probe.live_probe(FakeRpc(), "parent", Path("parent"), Path("child"), 1)
         self.assertEqual(native["status"], "observed")
-        self.assertEqual([item["actual"]["reasoningEffort"] for item in native["evidence"]["rootThreadReads"]], ["low", "xhigh"])
+        self.assertEqual([item["actual"]["reasoningEffort"] for item in native["evidence"]["rootThreadReads"]], ["low", "xhigh", "xhigh"])
+        for role in ("adventurer", "scholar", "inquisitor"):
+            self.assertEqual(native["evidence"]["expected"][role], {"status": "observed", "spawnEventCount": 1, "childMetadataMatches": 1})
         self.assertEqual(permission["status"], "unknown")
+
+        # Two Luna spawns cannot prove Scholar was used when both children
+        # report Adventurer, even if a child happens to be nicknamed Scholar.
+        rpc = FakeRpc()
+        rpc.metadata_roles["scholar"] = "adventurer"
+        native, _ = probe.live_probe(rpc, "parent", Path("parent"), Path("child"), 1)
+        self.assertEqual(native["status"], "failed")
+        self.assertEqual(native["evidence"]["expected"]["scholar"]["status"], "failed")
