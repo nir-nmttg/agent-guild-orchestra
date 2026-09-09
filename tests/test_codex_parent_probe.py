@@ -25,7 +25,22 @@ class ProbeHelpersTests(unittest.TestCase):
         native, permission = probe.live_probe(rpc, "parent", Path("parent"), Path("child"), 1)
         self.assertEqual(native["status"], "unknown")
         self.assertEqual({item["status"] for item in native["evidence"]["expected"].values()}, {"unknown"})
+        self.assertEqual(native["evidence"]["requestedRoles"], list(probe.EXPECTED))
         self.assertEqual(permission["reason"], "no live child thread was observed")
+
+    def test_role_selection_limits_live_probe_without_changing_static_roles(self) -> None:
+        options = probe.parse_args(["--live", "--role", "scholar", "--role", "sentinel"])
+        self.assertEqual(options.live_roles, ("scholar", "sentinel"))
+        self.assertEqual(probe.parse_args(["--roles", "verifier,sentinel,verifier"]).live_roles, ("verifier", "sentinel"))
+        defaults = probe.parse_args([])
+        self.assertEqual(defaults.live_roles, tuple(probe.EXPECTED))
+        self.assertEqual(defaults.live_timeout, 45.0)
+
+    def test_empty_role_selection_is_rejected_instead_of_running_all_roles(self) -> None:
+        for value in ("", ",,"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "requires at least one role"):
+                    probe.resolve_roles(None, [value])
 
     def test_rpc_reads_multiple_buffered_json_lines(self) -> None:
         read_fd, write_fd = os.pipe()
@@ -107,11 +122,11 @@ class ProbeHelpersTests(unittest.TestCase):
 
     def test_live_requires_parent_thread_read_and_marks_child_permission_unknown(self) -> None:
         class FakeRpc:
-            def __init__(self) -> None:
+            def __init__(self, roles=None) -> None:
                 self.messages = []
                 self.current_effort = None
                 self.spawn_count = 0
-                self.roles = ["adventurer", "scholar", "inquisitor"]
+                self.roles = list(roles or probe.EXPECTED)
                 self.metadata_roles = {}
 
             def call(self, method, params, timeout=20):
@@ -138,9 +153,23 @@ class ProbeHelpersTests(unittest.TestCase):
 
         native, permission = probe.live_probe(FakeRpc(), "parent", Path("parent"), Path("child"), 1)
         self.assertEqual(native["status"], "observed")
-        self.assertEqual([item["actual"]["reasoningEffort"] for item in native["evidence"]["rootThreadReads"]], ["low", "xhigh", "xhigh"])
-        for role in ("adventurer", "scholar", "inquisitor"):
-            self.assertEqual(native["evidence"]["expected"][role], {"status": "observed", "spawnEventCount": 1, "childMetadataMatches": 1})
+        self.assertEqual([item["actual"]["reasoningEffort"] for item in native["evidence"]["rootThreadReads"]], ["low", "xhigh", "xhigh", "xhigh", "xhigh"])
+        for role in probe.EXPECTED:
+            evidence = native["evidence"]["expected"][role]
+            self.assertEqual(evidence["status"], "observed")
+            self.assertEqual(evidence["declaration"], probe.EXPECTED[role])
+            self.assertEqual(evidence["observation"]["spawnEventCount"], 1)
+            self.assertEqual(evidence["observation"]["childMetadataMatches"], 1)
+        self.assertEqual(permission["status"], "unknown")
+
+        options = probe.parse_args(["--live", "--role", "scholar", "--role", "sentinel"])
+        rpc = FakeRpc(("scholar", "sentinel"))
+        native, permission = probe.live_probe(
+            rpc, "parent", Path("parent"), Path("child"), 1, options.live_roles
+        )
+        self.assertEqual(native["status"], "observed")
+        self.assertEqual(native["evidence"]["requestedRoles"], ["scholar", "sentinel"])
+        self.assertEqual(set(native["evidence"]["expected"]), {"scholar", "sentinel"})
         self.assertEqual(permission["status"], "unknown")
 
         # Two Luna spawns cannot prove Scholar was used when both children

@@ -28,6 +28,10 @@ def validate_model_selection_eval() -> None:
     require(plan.returncode == 0, plan.stderr)
     manifest = json.loads(plan.stdout)
     require(set(manifest["strategies"]) == {"astra_only", "astra_luna"}, "benchmark strategy matrix mismatch")
+    require(
+        set(manifest["profiles"]) == {"solo", "current3", "split3", "split4", "split6", "split8"},
+        "parallel execution profiles are not explicit",
+    )
     require(all("risk" in task and "review_required" in task for task in manifest["tasks"]), "task routing policy is not explicit")
 
     fixture = ROOT / "scripts/validation/fixtures/model_eval_offline.jsonl"
@@ -41,19 +45,97 @@ def validate_model_selection_eval() -> None:
     require(all(group["token_basis"] in {"synthetic", "unknown"} for group in value["groups"]), "synthetic tokens were labelled observed")
     require(all(group["codex_usage_basis"] == "unknown" and group["cost_basis"] == "unknown" and group["api_estimate_basis"] == "unknown" for group in value["groups"]), "synthetic usage gained an observed cost basis")
     require(all(group["wall_time_basis"] in {"synthetic", "unknown"} for group in value["groups"]), "synthetic wall time was labelled observed")
-    luna = next(group for group in value["groups"] if group["strategy"] == "astra_luna")
+    luna = next(group for group in value["groups"] if group["strategy"] == "astra_luna" and group["profile"] == "unknown")
     require(luna["assigned_tasks"] == 2 and luna["accepted_tasks"] == 2, "accepted-task denominator is wrong")
     require(luna["attempts"] == 3 and luna["total_tokens"] == 6300, "failed/retried work was omitted from token accounting")
     require(luna["worker_events"] == 3, "adaptive worker event accounting is wrong")
-    astra_group = next(group for group in value["groups"] if group["strategy"] == "astra_only")
+    astra_group = next(group for group in value["groups"] if group["strategy"] == "astra_only" and group["profile"] == "unknown")
     require(astra_group["review_events"] == 1 and astra_group["event_count"] == 3, "direct no-review task was not represented")
-    luna_group = next(group for group in value["groups"] if group["strategy"] == "astra_luna")
+    luna_group = next(group for group in value["groups"] if group["strategy"] == "astra_luna" and group["profile"] == "unknown")
     require(luna_group["review_events"] == 1 and luna_group["worker_events"] == 3, "material review and multiple worker events were not counted")
+    require(luna_group["max_open_threads"] is None and luna_group["max_open_threads_basis"] == "unknown", "missing thread measurements were converted to a value")
+    require(luna_group["max_parallel_child_turns"] is None and luna_group["max_parallel_child_turns_basis"] == "unknown", "missing turn timings were converted to a value")
     require("no model-quality" in value["claims"] and "host-usage" in value["claims"], "synthetic fixture emitted a model claim")
 
     rows = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line]
     with tempfile.TemporaryDirectory(prefix="agent-guild-model-eval-") as directory:
         malformed = Path(directory) / "invalid.jsonl"
+
+        # Profiled synthetic records exercise the optional schema without
+        # changing the legacy fixture used above.
+        profiled_rows = json.loads(json.dumps(rows))
+        for row_index, row in enumerate(profiled_rows):
+            row["run_id"] = f"profile-run-{row_index}"
+            if row["strategy"] == "astra_luna":
+                row["profile"] = "current3"
+            for attempt_index, attempt in enumerate(row["attempts"], 1):
+                has_child = any(event["role"] in {"worker", "review"} for event in attempt["stages"])
+                attempt["max_open_threads"] = 1 if has_child else 0
+                attempt["max_open_threads_source"] = "synthetic"
+                base = float(row_index * 100 + attempt_index * 10)
+                for event_index, event in enumerate(attempt["stages"]):
+                    if event["role"] == "root":
+                        event["named_role"] = "guildmaster"
+                    elif event["role"] == "review":
+                        event["named_role"] = "inquisitor"
+                    else:
+                        event["named_role"] = ("adventurer", "verifier", "sentinel")[event_index % 3]
+                    event["start_time"] = base + event_index
+                    event["end_time"] = base + event_index + 1
+        write_rows(malformed, profiled_rows)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, accepted.stderr)
+        profiled_summary = run("--summarize", str(malformed))
+        require(profiled_summary.returncode == 0, profiled_summary.stderr)
+        profiled_value = json.loads(profiled_summary.stdout)
+        current3 = next(group for group in profiled_value["groups"] if group["profile"] == "current3")
+        require(current3["run_count"] == 2, "profiled run identifiers were not retained")
+        require(current3["max_open_threads"] == 1 and current3["max_open_threads_basis"] == "synthetic", "open thread measurements were not aggregated")
+        require(current3["max_parallel_child_turns"] == 1 and current3["max_parallel_child_turns_basis"] == "synthetic", "child turn parallelism was not computed")
+        require(current3["named_role_events"].get("verifier") == 2 and current3["named_role_events"].get("sentinel") == 1, "named worker roles were not counted")
+        require(current3["usage_by_role"]["worker"]["tokens"] == 3300, "worker usage was not separated from total usage")
+
+        duplicate_run = json.loads(json.dumps(profiled_rows))
+        duplicate_record = json.loads(json.dumps(profiled_rows[1]))
+        duplicate_record["provenance"]["run_id"] = "profile-extra-provenance"
+        for attempt in duplicate_record["attempts"]:
+            for event in attempt["stages"]:
+                event["invocation_id"] += "-duplicate"
+        duplicate_record["run_id"] = profiled_rows[1]["run_id"]
+        duplicate_run.append(duplicate_record)
+        write_rows(malformed, duplicate_run)
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "duplicate task/strategy result" in rejected.stderr, "duplicate run identifier was accepted")
+
+        wrong_named_role = json.loads(json.dumps(profiled_rows[1]))
+        wrong_named_role["attempts"][0]["stages"][1]["named_role"] = "inquisitor"
+        write_rows(malformed, [wrong_named_role])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "accounting role" in rejected.stderr, "named role accounting mismatch was accepted")
+
+        invalid_timestamp = json.loads(json.dumps(profiled_rows[1]))
+        invalid_timestamp["attempts"][0]["stages"][1]["end_time"] = invalid_timestamp["attempts"][0]["stages"][1]["start_time"]
+        write_rows(malformed, [invalid_timestamp])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "end_time must be after" in rejected.stderr, "invalid timestamp ordering was accepted")
+
+        incomplete_timing = json.loads(json.dumps(profiled_rows[1]))
+        incomplete_timing["attempts"][0]["stages"][1].pop("end_time")
+        write_rows(malformed, [incomplete_timing])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "recorded together" in rejected.stderr, "incomplete timestamp pair was accepted")
+
+        incomplete_threads = json.loads(json.dumps(profiled_rows[1]))
+        incomplete_threads["attempts"][0].pop("max_open_threads_source")
+        write_rows(malformed, [incomplete_threads])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "measurement is incomplete" in rejected.stderr, "incomplete thread measurement was accepted")
+
+        over_cap = json.loads(json.dumps(profiled_rows[1]))
+        over_cap["attempts"][0]["max_open_threads"] = 4
+        write_rows(malformed, [over_cap])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "exceeds profile current3 cap" in rejected.stderr, "profile cap overflow was accepted")
 
         live_without_provenance = json.loads(json.dumps(rows[0]))
         live_without_provenance["evidence_kind"] = "observed_model_run"

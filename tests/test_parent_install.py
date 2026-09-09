@@ -134,26 +134,57 @@ class ParentInstallTests(unittest.TestCase):
             self.run_install("--config-mode", "managed")
         self.assert_children_unchanged()
 
-    def test_update_adds_scholar_and_three_slots_without_touching_children(self):
+    def test_update_migrates_three_roles_and_three_slots_to_five_and_eight(self):
         source = self.base / "previous-template"
         shutil.copytree(ROOT / "template", source)
-        (source / ".codex/agents/scholar.toml").unlink()
+        # Freeze the migration fixture at the supported pre-proposal shape:
+        # Adventurer, Scholar and Inquisitor with a three-child cap.
+        for role in ("verifier", "sentinel"):
+            (source / f".codex/agents/{role}.toml").unlink()
         config = source / ".codex/config.toml"
         config.write_text(config.read_text().replace(
+            "max_concurrent_threads_per_session = 8",
             "max_concurrent_threads_per_session = 3",
-            "max_concurrent_threads_per_session = 2",
         ))
         self.run_install("--source", str(source), "--allow-non-default-source")
+        initial_manifest = install.load_manifest(self.parent)
+        self.assertIsNotNone(initial_manifest)
+        assert initial_manifest is not None
+        initial_role_files = {
+            path for path in initial_manifest["files"]
+            if path.startswith(".codex/agents/") and path.endswith(".toml")
+        }
+        self.assertEqual(initial_role_files, {
+            ".codex/agents/adventurer.toml",
+            ".codex/agents/scholar.toml",
+            ".codex/agents/inquisitor.toml",
+        })
+        installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
+        self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 3)
+
+        # Unmanaged parent material is part of the migration contract and must
+        # survive the distribution update byte-for-byte.
+        override = put(self.parent, "AGENTS.override.md", "local parent override\n")
+        custom = put(self.parent, ".codex/local-settings.toml", "local_setting = true\n")
+        parent_custom_before = (override.read_bytes(), custom.read_bytes())
+        children_before = tree(self.parent / "repositories")
         before = tree(self.parent)
         dry = self.run_install("--dry-run")
         self.assertEqual(tree(self.parent), before)
-        self.assertIn({"action": "create", "path": ".codex/agents/scholar.toml"}, dry["actions"])
+        for role in ("verifier", "sentinel"):
+            self.assertIn({"action": "create", "path": f".codex/agents/{role}.toml"}, dry["actions"])
+        self.assertIn({"action": "update", "path": ".codex/config.toml"}, dry["actions"])
+
         self.run_install()
-        scholar = self.parent / ".codex/agents/scholar.toml"
-        self.assertEqual(scholar.read_bytes(), (ROOT / "template/.codex/agents/scholar.toml").read_bytes())
+        for role in ("adventurer", "scholar", "verifier", "sentinel", "inquisitor"):
+            installed_role = self.parent / f".codex/agents/{role}.toml"
+            self.assertEqual(installed_role.read_bytes(), (ROOT / f"template/.codex/agents/{role}.toml").read_bytes())
         installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
-        self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 3)
-        self.assertIn(".codex/agents/scholar.toml", install.load_manifest(self.parent)["files"])
+        self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 8)
+        self.assertEqual((override.read_bytes(), custom.read_bytes()), parent_custom_before)
+        self.assertEqual(tree(self.parent / "repositories"), children_before)
+        self.assertIn(".codex/agents/verifier.toml", install.load_manifest(self.parent)["files"])
+        self.assertIn(".codex/agents/sentinel.toml", install.load_manifest(self.parent)["files"])
         with patch.object(install, "write_atomic", side_effect=AssertionError("no-op wrote a file")):
             self.run_install()
         self.assert_children_unchanged()

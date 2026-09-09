@@ -45,7 +45,6 @@ AGENTS.mdはプロジェクトルートからcwdまで探索し、プロジェ�
 | 確認 | 結果 |
 | --- | --- |
 | 信頼済み親の`config/read`（2026-09-06の観測） | `gpt-6-astra`、コンテキスト 1,000,000、推論レベル未固定、エージェント有効・同時実行上限2、`multi_agent`を取得（観測時の値） |
-| 現行配布設定（変更後、実機未確認） | エージェント有効・同時実行上限3を設定 |
 | 親の`skills/list` | 親プロジェクトの標準五つを有効・解析エラーなしで検出。cwd別に判定し、`CODEX_HOME`のシステム用・ユーザー用SkillはプロジェクトSkillの判定から除外 |
 | 親の一時的な`thread/start` | Astra、推論レベル未固定、`instructionSources`に親フィクスチャの`AGENTS.md`、`approvalPolicy=never`、サンドボックス `readOnly`を確認 |
 | 子Gitルートの`config/read` | 子に置いた`child-collision-model`と`agents.enabled=false`を取得。親のモデルは子プロジェクト層に現れなかった |
@@ -53,9 +52,21 @@ AGENTS.mdはプロジェクトルートからcwdまで探索し、プロジェ�
 | 名前付きエージェント定義 | 配布TOMLの`name/model/model_reasoning_effort/sandbox_mode/instructions`を構造検証し、既存確認は`adventurer=Luna/max/workspace-write`、`inquisitor=Astra/xhigh/read-only`。追加した`scholar=Luna/max/read-only`は定義済みだが実機未確認 |
 | 名前付きエージェントの実起動（`--live`） | 通信を許可した既存確認でも、`low`で`adventurer`を要求した1ターン目が45秒の上限に達して停止。`item/completed`の`collabAgentToolCall`、子スレッドのメタデータは0件。`xhigh`/`inquisitor`へは進めておらず、`scholar`も未実行のため、実起動・メインセッションの推論レベル切替後の子指定維持・子の実効権限は**unknown** |
 
-`--live`を付けない通常実行ではモデルへ送信しません。probeは、`low→adventurer`、`xhigh→scholar`、`xhigh→inquisitor`の最大3ターンをこの順で要求します。追加したScholarの実機起動はこの変更時点で未確認です。各ターンのネイティブな`collabAgentToolCall`と`thread/read`のメタデータが揃ったときだけ`observed`にします。子エージェントの起動がない場合を成功扱いせず、再試行可能なエラー通知またはタイムアウトは`unknown`（構造化されたコード・種別があれば機微情報を除いた証拠付き）、構造化不一致は`failed`としてJSONに残します。過去の通信制限下での初回確認は再試行可能なエラー通知で停止し、通信許可後の確認は上記の`adventurer`タイムアウトで停止しました。原因をモデルや設定の不具合と断定せず、実呼び出しの追加再試行は行っていません。導入先で名前付きエージェントを実行しメタデータを取得するまで、実行時のエージェント検出、メインセッションの推論レベル切替後の子モデル/推論レベル、子の実効権限は確認済みとはしません。カスタムエージェントの読み取り専用宣言だけをOS上の権限保証にはしません。
+`--live`を付けない通常実行ではモデルへ送信しません。現在のprobeは、既定で`low→adventurer`、`xhigh→scholar`、`xhigh→verifier`、`xhigh→sentinel`、`xhigh→inquisitor`の最大5ターンを要求します。`--role verifier --role sentinel`または`--roles verifier,sentinel`で対象役を限定できます。空の役指定はエラーにし、誤って全役を実行しません。各ターンのネイティブな`collabAgentToolCall`と`thread/read`のメタデータが揃ったときだけ`observed`にします。子エージェントの起動がない場合を成功扱いせず、再試行可能なエラー通知またはタイムアウトは`unknown`（構造化されたコード・種別があれば機微情報を除いた証拠付き）、構造化不一致は`failed`としてJSONに残します。過去の通信制限下での初回確認は再試行可能なエラー通知で停止し、通信許可後の確認は上記の`adventurer`タイムアウトで停止しました。原因をモデルや設定の不具合と断定せず、実呼び出しの追加再試行は行っていません。導入先で名前付きエージェントを実行しメタデータを取得するまで、実行時のエージェント検出、メインセッションの推論レベル切替後の子モデル/推論レベル、子の実効権限は確認済みとはしません。カスタムエージェントの読み取り専用宣言だけをOS上の権限保証にはしません。
 
-この保守担当者用実機検証にはPython 3.11以降とホストのCodex CLIが必要です。通常の導入・更新はDockerだけを使い、このスクリプトを配布先へ導入しません。再確認時は`python3 scripts/check_codex_parent.py --output /tmp/codex-parent-smoke.json`を実行し、CLIがPATHにない場合は`--codex /absolute/path/to/codex`を指定します。実起動を試す場合だけ`--live --live-timeout 45`を追加してください。出力の`native_spawn`が`unknown`または`failed`なら、名前付きエージェントが使えたとは判断しません。
+この保守担当者用実機検証にはPython 3.11以降とホストのCodex CLIが必要です。通常の導入・更新はDockerだけを使い、このスクリプトを配布先へ導入しません。再確認時は`python3 scripts/check_codex_parent.py --output /tmp/codex-parent-smoke.json`を実行し、CLIがPATHにない場合は`--codex /absolute/path/to/codex`を指定します。実起動を試す場合だけ、例えば`--live --role verifier --role sentinel --live-timeout 45`を追加してください。定義の`declaration`と実起動の`observation`を分けて出力します。出力の`native_spawn`が`unknown`または`failed`なら、名前付きエージェントが使えたとは判断しません。
+
+2026-09-10、CLI **0.153.4**で変更後の一時親フィクスチャを再検証しました。モデルを呼ばないdiscoveryで次を確認しています。
+
+| 確認 | 結果 |
+| --- | --- |
+| 親の有効設定 | Astra、コンテキスト100万、推論未固定、agents有効、子タスク上限8、multi_agent有効を`config/read`で取得 |
+| カスタム定義 | Adventurer・Scholar・Verifier・SentinelはLuna/max、InquisitorはAstra/xhigh。5役の宣言と`agents.enabled=false`を確認 |
+| 指示・Skill・親子境界 | 親のAGENTS、標準5 Skill、親と子の衝突設定・Skillの分離を確認 |
+| 実際の8体並列と性能 | 未検証。上限8の読み込みは8体の実行や改善の証拠ではない |
+| 追加役の限定実起動 | `--live --role verifier --role sentinel --live-timeout 45`を実行。最初のVerifier要求で`responseStreamDisconnected`の再試行可能な通知を受け停止。spawnイベント・子メタデータ0件、Sentinel未着手。実起動と子の実効権限はunknown |
+
+構成の宣言検査に加え、オフラインの導入テストでは旧3役・上限3から5役・上限8への更新を確認します。既存の親独自ファイル、子リポジトリ、Gitの状態は保持し、再同期が不要な書き込みをしないことを確認します。
 
 ## 導入・移行の検証
 

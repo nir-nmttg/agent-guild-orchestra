@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from datetime import datetime
 import json
 import math
 from pathlib import Path
@@ -24,6 +25,23 @@ DEFAULT_MANIFEST = ROOT / "scripts/model_selection_eval.yaml"
 STRATEGIES = {"astra_only", "astra_luna"}
 SPLITS = {"pilot", "holdout"}
 ROLES = {"root", "worker", "review"}
+PROFILE_CAPS = {
+    "solo": {"strategy": "astra_only", "max_open_threads": 1},
+    "current3": {"strategy": "astra_luna", "max_open_threads": 3},
+    "split3": {"strategy": "astra_luna", "max_open_threads": 3},
+    "split4": {"strategy": "astra_luna", "max_open_threads": 4},
+    "split6": {"strategy": "astra_luna", "max_open_threads": 6},
+    "split8": {"strategy": "astra_luna", "max_open_threads": 8},
+}
+NAMED_ROLES = {
+    "guildmaster": {"role": "root", "model": "gpt-6-astra", "reasoning_effort": "high"},
+    "root": {"role": "root", "model": "gpt-6-astra", "reasoning_effort": "high"},
+    "adventurer": {"role": "worker", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
+    "scholar": {"role": "worker", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
+    "verifier": {"role": "worker", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
+    "sentinel": {"role": "worker", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
+    "inquisitor": {"role": "review", "model": "gpt-6-astra", "reasoning_effort": "xhigh"},
+}
 STAGE_STATUSES = {"completed", "failed"}
 EVIDENCE_KINDS = {"synthetic_fixture", "manual_record", "observed_model_run"}
 MEASUREMENT_SOURCES = {"observed", "manual", "synthetic", "unknown"}
@@ -48,6 +66,9 @@ SOURCE_POLICIES = {
         "cost": {"account_reported", "api_estimate", "unknown"},
     },
 }
+OPTIONAL_RECORD_FIELDS = {"profile", "run_id"}
+OPTIONAL_ATTEMPT_FIELDS = {"max_open_threads", "max_open_threads_source"}
+OPTIONAL_EVENT_FIELDS = {"named_role", "start_time", "end_time"}
 
 
 class EvalError(RuntimeError):
@@ -87,6 +108,111 @@ def optional_integer(value: object, label: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise EvalError(f"{label} must be a non-negative integer or null")
     return value
+
+
+def timestamp_seconds(value: object, label: str) -> float:
+    """Parse a monotonic numeric or timezone-qualified ISO-8601 timestamp."""
+    if isinstance(value, bool):
+        raise EvalError(f"{label} must be a finite timestamp")
+    if isinstance(value, (int, float)):
+        result = float(value)
+        if result < 0 or not math.isfinite(result):
+            raise EvalError(f"{label} must be a finite non-negative timestamp")
+        return result
+    if isinstance(value, str) and value.strip():
+        text = value.strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise EvalError(f"{label} must be a numeric or ISO-8601 timestamp") from exc
+        if parsed.tzinfo is None:
+            raise EvalError(f"{label} ISO-8601 timestamp must include a timezone")
+        result = parsed.timestamp()
+        if result < 0 or not math.isfinite(result):
+            raise EvalError(f"{label} must be a finite non-negative timestamp")
+        return result
+    raise EvalError(f"{label} must be a numeric or ISO-8601 timestamp")
+
+
+def profile_definitions(manifest: dict[str, Any]) -> dict[str, dict[str, object]]:
+    profiles = manifest.get("profiles")
+    if isinstance(profiles, dict):
+        return profiles
+    return PROFILE_CAPS
+
+
+def record_profile(record: dict[str, Any]) -> str | None:
+    value = record.get("profile")
+    return value if isinstance(value, str) else None
+
+
+def record_run_id(record: dict[str, Any]) -> str:
+    value = record.get("run_id")
+    if isinstance(value, str):
+        return value
+    return record["provenance"]["run_id"]
+
+
+def validate_named_role(value: object, role: str, model: str, effort: str, *, root_override: bool, label: str) -> None:
+    if value is None:
+        return
+    named_role = nonempty_string(value, label)
+    expected = NAMED_ROLES.get(named_role)
+    if expected is None:
+        raise EvalError(f"{label} is not a supported named role")
+    if expected["role"] != role:
+        raise EvalError(f"{label} accounting role must be {expected['role']}, got {role}")
+    if model != expected["model"]:
+        raise EvalError(f"{label} model must remain {expected['model']}")
+    if not (root_override and role == "root") and effort != expected["reasoning_effort"]:
+        raise EvalError(f"{label} reasoning_effort must remain {expected['reasoning_effort']}")
+
+
+def event_interval(event: dict[str, Any], label: str) -> tuple[float, float] | None:
+    has_start = "start_time" in event
+    has_end = "end_time" in event
+    if not has_start and not has_end:
+        return None
+    if has_start != has_end:
+        raise EvalError(f"{label} start_time and end_time must be recorded together")
+    start_value = event.get("start_time")
+    end_value = event.get("end_time")
+    if (start_value is None) != (end_value is None):
+        raise EvalError(f"{label} start_time and end_time must be recorded together")
+    if start_value is None:
+        return None
+    start = timestamp_seconds(start_value, f"{label}.start_time")
+    end = timestamp_seconds(end_value, f"{label}.end_time")
+    if end <= start:
+        raise EvalError(f"{label} end_time must be after start_time")
+    return start, end
+
+
+def max_parallel_child_turns(timing_events: list[tuple[str, float, float]]) -> int:
+    """Return peak overlapping worker/review turns; this is not open threads."""
+    points: list[tuple[float, int]] = []
+    for _role, start, end in timing_events:
+        points.append((start, 1))
+        points.append((end, -1))
+    active = 0
+    peak = 0
+    for _when, delta in sorted(points, key=lambda item: (item[0], item[1])):
+        active += delta
+        peak = max(peak, active)
+    return peak
+
+
+def attempt_child_turn_parallelism(attempt: dict[str, Any]) -> int | None:
+    child_events = [event for event in attempt["stages"] if event["role"] in {"worker", "review"}]
+    if not child_events:
+        return 0
+    timing_events: list[tuple[str, float, float]] = []
+    for index, event in enumerate(child_events, 1):
+        interval = event_interval(event, f"child event {index}")
+        if interval is None:
+            return None
+        timing_events.append((event["role"], interval[0], interval[1]))
+    return max_parallel_child_turns(timing_events)
 
 
 def validate_model_pair(value: object, label: str) -> None:
@@ -134,6 +260,23 @@ def validate_manifest(value: dict[str, Any]) -> None:
         review = strategies[label]["risk_review"]
         if review.get("model") != "gpt-6-astra" or review.get("reasoning_effort") != "xhigh":
             raise EvalError(f"strategy {label} must use an independent Astra/xhigh risk review")
+
+    profiles = value.get("profiles")
+    if profiles is not None:
+        if not isinstance(profiles, dict) or set(profiles) != set(PROFILE_CAPS):
+            raise EvalError(f"profiles must be exactly {sorted(PROFILE_CAPS)}")
+        for profile, definition in profiles.items():
+            if not isinstance(definition, dict) or set(definition) != {"strategy", "max_open_threads"}:
+                raise EvalError(f"profile {profile} must declare strategy and max_open_threads")
+            if definition["strategy"] not in STRATEGIES:
+                raise EvalError(f"profile {profile} has an invalid strategy")
+            cap = definition["max_open_threads"]
+            if not isinstance(cap, int) or isinstance(cap, bool) or cap < 0:
+                raise EvalError(f"profile {profile} max_open_threads must be a non-negative integer")
+            if cap != PROFILE_CAPS[profile]["max_open_threads"]:
+                raise EvalError(f"profile {profile} max_open_threads must remain {PROFILE_CAPS[profile]['max_open_threads']}")
+            if definition["strategy"] != PROFILE_CAPS[profile]["strategy"]:
+                raise EvalError(f"profile {profile} strategy must remain {PROFILE_CAPS[profile]['strategy']}")
 
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
@@ -289,12 +432,13 @@ def validate_event(
     event_index: int,
     invocation_ids: set[str],
     manifest: dict[str, Any],
+    timing_events: list[tuple[str, float, float]],
 ) -> str:
     required = {
         "sequence", "invocation_id", "role", "model", "reasoning_effort",
         "status", "failure_evidence", "usage", "elapsed_seconds", "evidence_refs",
     }
-    if not isinstance(event, dict) or set(event) != required:
+    if not isinstance(event, dict) or not required.issubset(event) or set(event) - required - OPTIONAL_EVENT_FIELDS:
         raise EvalError(f"{task_id} attempt {attempt_index} event {event_index} has invalid fields")
     if event["sequence"] != event_index + 1:
         raise EvalError(f"{task_id} attempt {attempt_index} events must preserve sequence order")
@@ -317,6 +461,14 @@ def validate_event(
                 raise EvalError(f"{task_id} root model must remain {expected['model']}; root_override only permits effort changes")
         elif model != expected["model"] or effort != expected["reasoning_effort"]:
             raise EvalError(f"{task_id} {strategy} {role} model/effort mismatch")
+    validate_named_role(
+        event.get("named_role"),
+        role,
+        model,
+        effort,
+        root_override=root_override,
+        label=f"{task_id} attempt {attempt_index} event {event_index}.named_role",
+    )
     failure = event["failure_evidence"]
     if event["status"] == "failed":
         nonempty_string(failure, f"{task_id} failed event {event_index}.failure_evidence")
@@ -327,6 +479,9 @@ def validate_event(
     refs = event["evidence_refs"]
     if not isinstance(refs, list) or not refs or any(not isinstance(ref, str) or not ref.strip() for ref in refs):
         raise EvalError(f"{task_id} attempt {attempt_index} event {event_index} needs evidence_refs")
+    interval = event_interval(event, f"{task_id} attempt {attempt_index} event {event_index}")
+    if interval is not None and role != "root":
+        timing_events.append((role, interval[0], interval[1]))
     return role
 
 
@@ -335,7 +490,7 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
         "task_id", "strategy", "split", "accepted", "attempts", "evidence_kind",
         "provenance", "task_input", "acceptance_evidence", "grade_refs",
     }
-    if set(record) != required:
+    if not required.issubset(record) or set(record) - required - OPTIONAL_RECORD_FIELDS:
         raise EvalError(f"record fields must be exactly {sorted(required)}")
     tasks = {task["id"]: task for task in manifest["tasks"]}
     task_id = record["task_id"]
@@ -355,6 +510,19 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
     validate_provenance(record["provenance"], kind, task_id)
     provenance = record["provenance"]
     assert isinstance(provenance, dict)
+    if "run_id" in record:
+        nonempty_string(record["run_id"], f"{task_id} run_id")
+    profile = record_profile(record)
+    if "profile" in record:
+        nonempty_string(record["profile"], f"{task_id} profile")
+        definitions = profile_definitions(manifest)
+        if profile not in definitions:
+            raise EvalError(f"{task_id} profile is unsupported: {profile}")
+        profile_definition = definitions[profile]
+        if not isinstance(profile_definition, dict):
+            raise EvalError(f"{task_id} profile definition is invalid: {profile}")
+        if profile_definition.get("strategy") != strategy:
+            raise EvalError(f"{task_id} profile {profile} is incompatible with {strategy}")
     if record["task_input"] != task["objective"]:
         raise EvalError(f"task_input mismatch for {task_id}")
     grade_refs = record["grade_refs"]
@@ -382,7 +550,7 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
     all_invocation_ids = invocation_ids if invocation_ids is not None else set()
     for attempt_index, attempt in enumerate(attempts, 1):
         attempt_required = {"attempt", "accepted", "wall_time_seconds", "wall_time_source", "stages"}
-        if not isinstance(attempt, dict) or set(attempt) != attempt_required:
+        if not isinstance(attempt, dict) or not attempt_required.issubset(attempt) or set(attempt) - attempt_required - OPTIONAL_ATTEMPT_FIELDS:
             raise EvalError(f"{task_id} attempt {attempt_index} has invalid fields")
         if attempt["attempt"] != attempt_index or not isinstance(attempt["accepted"], bool):
             raise EvalError(f"{task_id} attempts must be sequential and carry boolean accepted")
@@ -393,12 +561,35 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
             raise EvalError(f"{task_id} attempt {attempt_index} wall_time_source is invalid")
         if attempt["wall_time_source"] not in SOURCE_POLICIES[kind]["wall"]:
             raise EvalError(f"{task_id} attempt {attempt_index} wall_time_source is inconsistent with {kind}")
+        if "max_open_threads" in attempt or "max_open_threads_source" in attempt:
+            if "max_open_threads" not in attempt or "max_open_threads_source" not in attempt:
+                raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads measurement is incomplete")
+            open_threads = optional_integer(attempt["max_open_threads"], f"{task_id} attempt {attempt_index} max_open_threads")
+            open_source = attempt["max_open_threads_source"]
+            if open_source not in MEASUREMENT_SOURCES:
+                raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads_source is invalid")
+            if open_source not in SOURCE_POLICIES[kind]["wall"]:
+                raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads_source is inconsistent with {kind}")
+            if open_threads is None and open_source not in {"unknown", "synthetic"}:
+                raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads_source must be unknown when count is null")
+            if open_threads is not None and open_source in {"unknown", "synthetic"} and kind != "synthetic_fixture":
+                raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads_source must identify a measured count")
+            if profile is not None and open_threads is not None:
+                cap = profile_definitions(manifest)[profile]["max_open_threads"]
+                if not isinstance(cap, int):
+                    raise EvalError(f"{task_id} profile {profile} has an invalid max_open_threads")
+                if open_threads > cap:
+                    raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads exceeds profile {profile} cap {cap}")
         events = attempt["stages"]
         if not isinstance(events, list) or not events:
             raise EvalError(f"{task_id} attempt {attempt_index} events must be non-empty")
         observed_roles: set[str] = set()
         failed = False
+        timing_events: list[tuple[str, float, float]] = []
+        child_event_count = 0
         for event_index, event in enumerate(events):
+            if isinstance(event, dict) and event.get("role") in {"worker", "review"}:
+                child_event_count += 1
             role = validate_event(
                 event,
                 task_id=task_id,
@@ -409,11 +600,21 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
                 event_index=event_index,
                 invocation_ids=all_invocation_ids,
                 manifest=manifest,
+                timing_events=timing_events,
             )
             observed_roles.add(role)
             failed = failed or event["status"] == "failed"
         if "root" not in observed_roles:
             raise EvalError(f"{task_id} attempt {attempt_index} must account for root usage")
+        if timing_events and len(timing_events) != child_event_count:
+            raise EvalError(f"{task_id} attempt {attempt_index} child turn timing is incomplete")
+        if profile is not None and timing_events:
+            cap = profile_definitions(manifest)[profile]["max_open_threads"]
+            if not isinstance(cap, int):
+                raise EvalError(f"{task_id} profile {profile} has an invalid max_open_threads")
+            peak = max_parallel_child_turns(timing_events)
+            if peak > cap:
+                raise EvalError(f"{task_id} attempt {attempt_index} child turn parallelism exceeds profile {profile} cap {cap}")
         if attempt["accepted"] and failed:
             raise EvalError(f"{task_id} accepted attempt {attempt_index} may not contain a failed event")
     record_root_pair(record, task_id)
@@ -429,13 +630,18 @@ def _sum_measurements(
     field: str,
     source_field: str,
     allowed_sources: set[str],
+    roles: set[str] | None = None,
 ) -> tuple[float | None, str]:
     values: list[float] = []
     sources: set[str] = set()
     complete = True
+    considered = False
     for row in rows:
         for attempt in row["attempts"]:
             for event in attempt["stages"]:
+                if roles is not None and event["role"] not in roles:
+                    continue
+                considered = True
                 usage = event["usage"]
                 value = usage[field]
                 source = usage[source_field]
@@ -444,6 +650,8 @@ def _sum_measurements(
                     complete = False
                 else:
                     values.append(float(value))
+    if not considered:
+        return 0, "none"
     if not complete or not sources:
         return None, "unknown"
     return sum(values), next(iter(sources)) if len(sources) == 1 else "mixed"
@@ -463,18 +671,76 @@ def _sum_wall_time(rows: list[dict[str, Any]]) -> tuple[float | None, str]:
     return sum(values), next(iter(sources)) if len(sources) == 1 else "mixed"
 
 
+def _measurement_basis(sources: set[str], *, allowed: set[str]) -> str:
+    if not sources or not sources.issubset(allowed):
+        return "unknown"
+    return next(iter(sources)) if len(sources) == 1 else "mixed"
+
+
+def _max_parallel_child_turns(rows: list[dict[str, Any]]) -> tuple[int | None, str]:
+    values: list[int] = []
+    sources: set[str] = set()
+    complete = True
+    saw_child = False
+    for row in rows:
+        for attempt in row["attempts"]:
+            child_events = [event for event in attempt["stages"] if event["role"] in {"worker", "review"}]
+            if not child_events:
+                continue
+            saw_child = True
+            peak = attempt_child_turn_parallelism(attempt)
+            source = attempt["wall_time_source"]
+            sources.add(source)
+            if peak is None:
+                complete = False
+            else:
+                values.append(peak)
+    if not saw_child:
+        return 0, "structural"
+    if not complete or not values:
+        return None, "unknown"
+    return max(values), _measurement_basis(sources, allowed={"observed", "manual", "synthetic"})
+
+
+def _max_open_threads(rows: list[dict[str, Any]]) -> tuple[int | None, str]:
+    values: list[int] = []
+    sources: set[str] = set()
+    complete = True
+    saw_measurement = False
+    for row in rows:
+        for attempt in row["attempts"]:
+            if "max_open_threads" not in attempt:
+                complete = False
+                continue
+            saw_measurement = True
+            value = attempt["max_open_threads"]
+            source = attempt.get("max_open_threads_source")
+            if value is None or source not in {"observed", "manual", "synthetic"}:
+                complete = False
+                continue
+            values.append(value)
+            sources.add(source)
+    if not saw_measurement or not complete or not values:
+        return None, "unknown"
+    return max(values), _measurement_basis(sources, allowed={"observed", "manual", "synthetic"})
+
+
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    grouped: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         root_model, root_effort = record_root_pair(row, row["task_id"])
-        grouped[(row["evidence_kind"], row["split"], row["strategy"], root_model, root_effort)].append(row)
+        profile = record_profile(row) or "unknown"
+        run_group = row.get("run_id") if isinstance(row.get("run_id"), str) else "unknown"
+        grouped[(row["evidence_kind"], row["split"], row["strategy"], profile, run_group, root_model, root_effort)].append(row)
     output: dict[str, Any] = {"groups": []}
-    for (kind, split, strategy, root_model, root_effort), values in sorted(grouped.items()):
+    for (kind, split, strategy, profile, run_group, root_model, root_effort), values in sorted(grouped.items()):
         total_tokens, token_basis = _sum_measurements(values, "tokens", "usage_source", {"observed", "synthetic"})
         total_codex_usage, codex_basis = _sum_measurements(values, "codex_usage", "usage_source", {"observed"})
         total_account_cost, account_cost_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"account_reported"})
         total_api_estimate, api_estimate_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"api_estimate"})
         total_wall, wall_basis = _sum_wall_time(values)
+        max_parallel, parallel_basis = _max_parallel_child_turns(values)
+        max_open, open_basis = _max_open_threads(values)
         assigned = len(values)
         accepted = sum(1 for row in values if row["accepted"])
         event_count = sum(len(attempt["stages"]) for row in values for attempt in row["attempts"])
@@ -484,11 +750,62 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         reviews = sum(
             1 for row in values for attempt in row["attempts"] for event in attempt["stages"] if event["role"] == "review"
         )
+        usage_by_role: dict[str, dict[str, float | int | str | None]] = {}
+        for role_name in sorted(ROLES):
+            role_tokens, role_token_basis = _sum_measurements(
+                values,
+                "tokens",
+                "usage_source",
+                {"observed", "synthetic"},
+                roles={role_name},
+            )
+            role_codex, role_codex_basis = _sum_measurements(
+                values,
+                "codex_usage",
+                "usage_source",
+                {"observed"},
+                roles={role_name},
+            )
+            role_account_cost, role_account_basis = _sum_measurements(
+                values,
+                "api_cost_usd",
+                "api_cost_source",
+                {"account_reported"},
+                roles={role_name},
+            )
+            role_api_estimate, role_api_basis = _sum_measurements(
+                values,
+                "api_cost_usd",
+                "api_cost_source",
+                {"api_estimate"},
+                roles={role_name},
+            )
+            usage_by_role[role_name] = {
+                "tokens": role_tokens,
+                "token_basis": role_token_basis,
+                "codex_usage": role_codex,
+                "codex_usage_basis": role_codex_basis,
+                "account_cost_usd": role_account_cost,
+                "account_cost_basis": role_account_basis,
+                "api_estimate_cost_usd": role_api_estimate,
+                "api_estimate_basis": role_api_basis,
+            }
+        named_roles: dict[str, int] = defaultdict(int)
+        for row in values:
+            for attempt in row["attempts"]:
+                for event in attempt["stages"]:
+                    named_role = event.get("named_role")
+                    if isinstance(named_role, str):
+                        named_roles[named_role] += 1
         output["groups"].append(
             {
                 "evidence_kind": kind,
                 "split": split,
                 "strategy": strategy,
+                "profile": profile,
+                "run_id": run_group,
+                "run_ids": sorted(record_run_id(row) for row in values),
+                "run_count": len({record_run_id(row) for row in values}),
                 "root_model": root_model,
                 "root_reasoning_effort": root_effort,
                 "assigned_tasks": assigned,
@@ -508,6 +825,12 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "api_estimate_basis": api_estimate_basis,
                 "total_wall_time_seconds": total_wall,
                 "wall_time_basis": wall_basis,
+                "max_open_threads": max_open,
+                "max_open_threads_basis": open_basis,
+                "max_parallel_child_turns": max_parallel,
+                "max_parallel_child_turns_basis": parallel_basis,
+                "named_role_events": dict(sorted(named_roles.items())),
+                "usage_by_role": usage_by_role,
             }
         )
     kinds = {row["evidence_kind"] for row in rows}
@@ -561,19 +884,21 @@ def main(argv: list[str] | None = None) -> int:
         rows = list(records(result_path))
         if not rows:
             raise EvalError("results are empty")
-        keys: set[tuple[str, str]] = set()
-        run_ids: set[str] = set()
+        keys: set[tuple[str, str, str, str, str, str]] = set()
+        provenance_run_ids: set[str] = set()
         invocation_ids: set[str] = set()
         for row in rows:
             validate_record(row, manifest, invocation_ids)
-            key = (row["task_id"], row["strategy"])
+            profile = record_profile(row) or "unknown"
+            run_id = record_run_id(row)
+            key = (row["evidence_kind"], row["split"], row["task_id"], row["strategy"], profile, run_id)
             if key in keys:
-                raise EvalError(f"duplicate task/strategy result: {key}")
+                raise EvalError(f"duplicate task/strategy result (profile/run): {key}")
             keys.add(key)
-            run_id = row["provenance"]["run_id"]
-            if run_id in run_ids:
-                raise EvalError(f"duplicate run_id: {run_id}")
-            run_ids.add(run_id)
+            provenance_run_id = row["provenance"]["run_id"]
+            if provenance_run_id in provenance_run_ids:
+                raise EvalError(f"duplicate provenance run_id: {provenance_run_id}")
+            provenance_run_ids.add(provenance_run_id)
         validate_coverage(rows, manifest)
         if args.summarize:
             print(json.dumps(aggregate(rows), ensure_ascii=False, indent=2))

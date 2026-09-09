@@ -28,8 +28,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
     "adventurer": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "workspace-write"},
     "scholar": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "read-only"},
+    "verifier": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "workspace-write"},
+    "sentinel": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "read-only"},
     "inquisitor": {"model": "gpt-6-astra", "effort": "xhigh", "sandbox": "read-only"},
 }
+ROLE_NAMES = tuple(EXPECTED)
+EXPECTED_MAX_THREADS = 8
+LIVE_TURN_EFFORT = {name: "xhigh" for name in ROLE_NAMES}
+LIVE_TURN_EFFORT["adventurer"] = "low"
 
 
 class ProbeError(RuntimeError):
@@ -152,10 +158,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target-repo-root", default=str(REPO_ROOT), help="template/を含むGitリポジトリ。")
     parser.add_argument("--codex", default=os.environ.get("CODEX_BIN") or shutil.which("codex") or "codex", help="Codex実行ファイルのパス（CODEX_BINでも指定可能）。")
     parser.add_argument("--output", help="結果JSONのパス（既定: OSの一時ディレクトリ/codex-parent-smoke-*.json）。")
-    parser.add_argument("--live", action="store_true", help="時間制限付きで、名前付きエージェントを実際に呼び出す最大3ターンを要求。")
+    parser.add_argument("--role", dest="roles", action="append", choices=ROLE_NAMES, help="--liveで確認する役。複数指定可（省略時は全5役）。")
+    parser.add_argument("--roles", dest="roles_csv", action="append", metavar="ROLE[,ROLE...]", help="--liveで確認する役をカンマ区切りで指定（--roleと併用可）。")
+    parser.add_argument("--live", action="store_true", help="時間制限付きで、名前付きエージェントを実際に呼び出す最大5ターンを要求。")
     parser.add_argument("--live-timeout", type=float, default=45.0, help="実呼び出しの1ターン当たりの制限秒数（既定: 45）。")
     parser.add_argument("--keep-fixture", action="store_true", help="検証用の親・子を残す。一時的な認証設定ディレクトリは削除する。")
-    return parser.parse_args(argv)
+    options = parser.parse_args(argv)
+    try:
+        options.live_roles = resolve_roles(options.roles, options.roles_csv)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return options
+
+
+def resolve_roles(roles: list[str] | None, roles_csv: list[str] | None) -> tuple[str, ...]:
+    """Return a stable, de-duplicated live-probe role selection."""
+    values: list[str] = list(roles or [])
+    for group in roles_csv or []:
+        selected = [item.strip() for item in group.split(",") if item.strip()]
+        if not selected:
+            raise ValueError("--roles requires at least one role")
+        values.extend(selected)
+    if not values:
+        return ROLE_NAMES
+    unknown_roles = [item for item in values if item not in EXPECTED]
+    if unknown_roles:
+        raise ValueError(f"unknown role(s): {', '.join(dict.fromkeys(unknown_roles))}")
+    return tuple(dict.fromkeys(values))
 
 
 def observed(evidence: Any) -> dict[str, Any]:
@@ -305,9 +334,29 @@ def named_defs(parent: Path) -> dict[str, Any]:
         except (OSError, tomllib.TOMLDecodeError) as exc:
             output[name] = {"status": "failed", "errorType": type(exc).__name__}
             continue
-        actual = {"name": value.get("name"), "model": value.get("model"), "effort": value.get("model_reasoning_effort"), "sandbox": value.get("sandbox_mode"), "developerInstructions": isinstance(value.get("developer_instructions"), str)}
-        want = {"name": name, "model": expected["model"], "effort": expected["effort"], "sandbox": expected["sandbox"], "developerInstructions": True}
-        output[name] = {"status": "observed" if actual == want else "failed", "actual": actual}
+        agents = value.get("agents") if isinstance(value.get("agents"), dict) else {}
+        declaration = {
+            "name": value.get("name"),
+            "model": value.get("model"),
+            "effort": value.get("model_reasoning_effort"),
+            "sandbox": value.get("sandbox_mode"),
+            "agentsEnabled": agents.get("enabled"),
+            "developerInstructions": isinstance(value.get("developer_instructions"), str),
+        }
+        expected_declaration = {
+            "name": name,
+            "model": expected["model"],
+            "effort": expected["effort"],
+            "sandbox": expected["sandbox"],
+            "agentsEnabled": False,
+            "developerInstructions": True,
+        }
+        # This is a declaration-file check.  Live child metadata is kept in
+        # ``native_spawn`` and must never be inferred from this result.
+        output[name] = {
+            "status": "observed" if declaration == expected_declaration else "failed",
+            "declaration": declaration,
+        }
     return output
 
 
@@ -315,7 +364,7 @@ def static_probe(rpc: Rpc, parent: Path, child: Path) -> tuple[dict[str, Any], s
     checks: dict[str, Any] = {}
     parent_cfg = config_view(result_of(rpc.call("config/read", {"cwd": str(parent), "includeLayers": True}), "config/read"))
     child_cfg = config_view(result_of(rpc.call("config/read", {"cwd": str(child), "includeLayers": True}), "config/read"))
-    expected_parent = {"model": "gpt-6-astra", "contextWindow": 1_000_000, "reasoningEffort": None, "agentsEnabled": True, "maxThreads": 3, "multiAgent": True}
+    expected_parent = {"model": "gpt-6-astra", "contextWindow": 1_000_000, "reasoningEffort": None, "agentsEnabled": True, "maxThreads": EXPECTED_MAX_THREADS, "multiAgent": True}
     checks["parent_config"] = observed(parent_cfg) if parent_cfg == expected_parent else failed("parent_config_mismatch", parent_cfg)
     checks["child_config_collision"] = observed(child_cfg) if child_cfg["model"] == "child-collision-model" and child_cfg["agentsEnabled"] is False else failed("child_config_mismatch", child_cfg)
 
@@ -373,12 +422,24 @@ def collab_items(rpc: Rpc, thread_id: str) -> list[dict[str, Any]]:
 
 
 def live_probe(
-    rpc: Rpc, parent_thread: str, parent: Path, child: Path, timeout: float
+    rpc: Rpc,
+    parent_thread: str,
+    parent: Path,
+    child: Path,
+    timeout: float,
+    roles: tuple[str, ...] | list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    selected_roles = ROLE_NAMES if roles is None else tuple(dict.fromkeys(roles))
+    if not selected_roles:
+        raise ProbeError("live probe requires at least one role")
+    unknown_roles = [agent for agent in selected_roles if agent not in EXPECTED]
+    if unknown_roles:
+        raise ProbeError(f"unknown live probe role: {unknown_roles[0]}")
     turns: list[dict[str, Any]] = []
     root_reads: list[dict[str, Any]] = []
     blocked: str | None = None
-    for index, (effort, agent) in enumerate((("low", "adventurer"), ("xhigh", "scholar"), ("xhigh", "inquisitor")), 1):
+    for index, agent in enumerate(selected_roles, 1):
+        effort = LIVE_TURN_EFFORT[agent]
         prompt = (
             f"Codex標準のエージェント起動を確認します。名前付きエージェント`{agent}`を選び、標準の協調機能でちょうど1回起動してください。"
             f"そのエージェントに親={parent}と子Gitルート={child}を読み取り専用で調べさせてください。"
@@ -387,7 +448,7 @@ def live_probe(
         response = rpc.call("turn/start", {"threadId": parent_thread, "input": [{"type": "text", "text": prompt}], "effort": effort})
         if "error" in response:
             return (
-                failed("turn_start_error", {"turns": turns, "requestedEffort": effort, "requestedAgent": agent, "error": sanitized_error(response.get("error"))}),
+                failed("turn_start_error", {"turns": turns, "requestedRoles": list(selected_roles), "requestedEffort": effort, "requestedAgent": agent, "error": sanitized_error(response.get("error"))}),
                 unknown("no child permission metadata was available", {"requested": True}),
             )
         turn = (response.get("result") or {}).get("turn")
@@ -438,15 +499,32 @@ def live_probe(
             metadata.append({"id": child_id, "status": "unknown"})
 
     expected_events: dict[str, Any] = {}
-    for agent, want in EXPECTED.items():
+    for agent in selected_roles:
+        want = EXPECTED[agent]
         named = [item for item in metadata if item.get("parentThreadId") == parent_thread and (item.get("agentRole") or item.get("agentNickname")) == agent and item.get("model") == want["model"] and item.get("reasoningEffort") == want["effort"]]
         # Adventurer and Scholar share a model/effort pair. Bind each event to
         # its named child instead of counting the other role's Luna spawn.
         named_ids = {item["id"] for item in named if isinstance(item.get("id"), str)}
         matches = [event for event in spawns if event.get("model") == want["model"] and event.get("reasoningEffort") == want["effort"] and len(event.get("receiverThreadIds") or []) == 1 and event["receiverThreadIds"][0] in named_ids]
         status = "observed" if len(matches) == 1 and len(named) == 1 else "unknown" if blocked else "failed"
-        expected_events[agent] = {"status": status, "spawnEventCount": len(matches), "childMetadataMatches": len(named)}
-    evidence = {"turns": turns, "rootThreadReads": root_reads, "spawnEvents": spawns, "childThreadMetadata": metadata, "expected": expected_events, "requested": True}
+        expected_events[agent] = {
+            "status": status,
+            "declaration": {"model": want["model"], "effort": want["effort"], "sandbox": want["sandbox"]},
+            "observation": {
+                "spawnEventCount": len(matches),
+                "childMetadataMatches": len(named),
+                "childThreadIds": sorted(named_ids),
+            },
+        }
+    evidence = {
+        "turns": turns,
+        "rootThreadReads": root_reads,
+        "spawnEvents": spawns,
+        "childThreadMetadata": metadata,
+        "expected": expected_events,
+        "requestedRoles": list(selected_roles),
+        "requested": True,
+    }
     child_permissions = [
         item
         for item in metadata
@@ -462,7 +540,7 @@ def live_probe(
     if blocked:
         evidence["blocked"] = True
         return unknown(f"bounded live probe stopped: {blocked}", evidence), permission_result
-    if all(item["status"] == "observed" for item in expected_events.values()) and all(item["status"] == "observed" for item in root_reads) and len(spawns) == len(EXPECTED) and len(metadata) == len(EXPECTED):
+    if all(item["status"] == "observed" for item in expected_events.values()) and all(item["status"] == "observed" for item in root_reads) and len(spawns) == len(selected_roles) and len(metadata) == len(selected_roles):
         return observed(evidence), permission_result
     if any(item["status"] == "unknown" for item in root_reads):
         return unknown("parent thread/read metadata unavailable", evidence), permission_result
@@ -479,7 +557,18 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"template source does not exist: {source}")
     output = Path(options.output).expanduser() if options.output else Path(tempfile.gettempdir()) / f"codex-parent-smoke-{int(time.time())}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
-    report: dict[str, Any] = {"schema": 1, "status": "failed", "codex": options.codex, "inputs": {"targetRepoRoot": str(target), "liveRequested": bool(options.live), "liveTimeoutSeconds": options.live_timeout}, "checks": {}}
+    report: dict[str, Any] = {
+        "schema": 1,
+        "status": "failed",
+        "codex": options.codex,
+        "inputs": {
+            "targetRepoRoot": str(target),
+            "liveRequested": bool(options.live),
+            "liveTimeoutSeconds": options.live_timeout,
+            "liveRoles": list(options.live_roles),
+        },
+        "checks": {},
+    }
     parent: Path | None = None
     home: Path | None = None
     rpc: Rpc | None = None
@@ -496,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
         checks, parent_thread = static_probe(rpc, parent, child)
         report["checks"].update(checks)
         if options.live:
-            native_spawn, child_permission = live_probe(rpc, parent_thread, parent, child, options.live_timeout)
+            native_spawn, child_permission = live_probe(rpc, parent_thread, parent, child, options.live_timeout, options.live_roles)
             report["checks"]["native_spawn"] = native_spawn
             report["checks"]["child_effective_permission"] = child_permission
         else:

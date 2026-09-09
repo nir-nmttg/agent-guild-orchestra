@@ -12,6 +12,14 @@
       "risk_review": {"mode": "risk_based", "model": "gpt-6-astra", "reasoning_effort": "xhigh"}
     }
   },
+  "profiles": {
+    "solo": {"strategy": "astra_only", "max_open_threads": 0},
+    "current3": {"strategy": "astra_luna", "max_open_threads": 3},
+    "split3": {"strategy": "astra_luna", "max_open_threads": 3},
+    "split4": {"strategy": "astra_luna", "max_open_threads": 4},
+    "split6": {"strategy": "astra_luna", "max_open_threads": 6},
+    "split8": {"strategy": "astra_luna", "max_open_threads": 8}
+  },
   "tasks": [
     {
       "id": "pilot-installer-conflict",

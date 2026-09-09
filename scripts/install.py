@@ -695,7 +695,7 @@ def build_next_steps(target: Path, config_mode: str, *, config_snippet: str | No
         f"Open and trust the parent directory in Codex, then start a fresh local task there: {target}.",
         f"CLI startup: codex --cd {target}",
         "Keep the session cwd at the parent. Pass an explicit child Git root to coding tasks and all Git/snapshot helpers.",
-        "利用者が選んだ推論レベルのgpt-6-astra、100万コンテキスト、実験的コンテキスト管理、標準Skill、adventurer（gpt-5.6-luna/max）、scholar（gpt-5.6-luna/max・read-only）、inquisitor（gpt-6-astra/xhigh）、サブエージェント同時実行上限3を確認してください。",
+        "利用者が選んだ推論レベルのgpt-6-astra、100万コンテキスト、実験的コンテキスト管理、標準Skill、Luna/maxのadventurer・scholar・verifier・sentinel、inquisitor（Astra/xhigh）、サブエージェント上限8（通常2〜4体、ホストの空き枠内）を確認してください。",
         "Starting Codex directly inside a child Git repository is not the supported shared-config entry point: Git boundaries can stop parent discovery.",
         "Review child AGENTS.override.md/AGENTS.md and local settings before working there. A child config is not silently merged into a parent-started session; child-started sessions may load it instead.",
     ]
