@@ -66,20 +66,21 @@ def validate_model_selection_eval() -> None:
         profiled_rows = json.loads(json.dumps(rows))
         for row_index, row in enumerate(profiled_rows):
             row["run_id"] = f"profile-run-{row_index}"
-            if row["strategy"] == "astra_luna":
-                row["profile"] = "current3"
+            row["profile"] = "solo" if row["strategy"] == "astra_only" else "split3"
             for attempt_index, attempt in enumerate(row["attempts"], 1):
                 has_child = any(event["role"] in {"worker", "review"} for event in attempt["stages"])
                 attempt["max_open_threads"] = 1 if has_child else 0
                 attempt["max_open_threads_source"] = "synthetic"
                 base = float(row_index * 100 + attempt_index * 10)
+                worker_role_index = 0
                 for event_index, event in enumerate(attempt["stages"]):
                     if event["role"] == "root":
                         event["named_role"] = "guildmaster"
                     elif event["role"] == "review":
                         event["named_role"] = "inquisitor"
                     else:
-                        event["named_role"] = ("adventurer", "verifier", "sentinel")[event_index % 3]
+                        event["named_role"] = ("adventurer", "scholar", "adventurer")[worker_role_index % 3]
+                        worker_role_index += 1
                     event["start_time"] = base + event_index
                     event["end_time"] = base + event_index + 1
         write_rows(malformed, profiled_rows)
@@ -88,12 +89,58 @@ def validate_model_selection_eval() -> None:
         profiled_summary = run("--summarize", str(malformed))
         require(profiled_summary.returncode == 0, profiled_summary.stderr)
         profiled_value = json.loads(profiled_summary.stdout)
-        current3 = next(group for group in profiled_value["groups"] if group["profile"] == "current3")
-        require(current3["run_count"] == 2, "profiled run identifiers were not retained")
-        require(current3["max_open_threads"] == 1 and current3["max_open_threads_basis"] == "synthetic", "open thread measurements were not aggregated")
-        require(current3["max_parallel_child_turns"] == 1 and current3["max_parallel_child_turns_basis"] == "synthetic", "child turn parallelism was not computed")
-        require(current3["named_role_events"].get("verifier") == 2 and current3["named_role_events"].get("sentinel") == 1, "named worker roles were not counted")
-        require(current3["usage_by_role"]["worker"]["tokens"] == 3300, "worker usage was not separated from total usage")
+        split3 = next(group for group in profiled_value["groups"] if group["profile"] == "split3")
+        require(split3["run_count"] == 2, "profiled run identifiers were not retained")
+        require(split3["max_open_threads"] == 1 and split3["max_open_threads_basis"] == "synthetic", "open thread measurements were not aggregated")
+        require(split3["max_parallel_child_turns"] == 1 and split3["max_parallel_child_turns_basis"] == "synthetic", "child turn parallelism was not computed")
+        require(split3["named_role_events"].get("adventurer") == 2 and split3["named_role_events"].get("scholar") == 1, "named worker roles were not counted")
+        require(split3["usage_by_role"]["worker"]["tokens"] == 3300, "worker usage was not separated from total usage")
+
+        # The current three-child condition predates Verifier/Sentinel.  Keep
+        # those new roles exclusive to split profiles.
+        for invalid_role in ("verifier", "sentinel"):
+            current3_role = json.loads(json.dumps(profiled_rows[1]))
+            current3_role["profile"] = "current3"
+            current3_role["run_id"] = f"current3-invalid-{invalid_role}"
+            current3_role["provenance"]["run_id"] = f"current3-invalid-provenance-{invalid_role}"
+            current3_role["attempts"][0]["stages"][1]["named_role"] = invalid_role
+            write_rows(malformed, [current3_role])
+            rejected = run("--validate-results", str(malformed))
+            require(rejected.returncode == 2 and "not allowed by profile current3" in rejected.stderr, "current3 accepted a newly added worker role")
+
+        missing_named_role = json.loads(json.dumps(profiled_rows[1]))
+        missing_named_role["attempts"][0]["stages"][1].pop("named_role")
+        write_rows(malformed, [missing_named_role])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "requires named_role" in rejected.stderr, "explicit profile accepted a missing named role")
+
+        incomplete_profile = json.loads(json.dumps(profiled_rows))
+        incomplete_profile.pop(1)
+        write_rows(malformed, incomplete_profile)
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "split3 result matrix is incomplete" in rejected.stderr, "profile coverage was filled by another profile")
+
+        partial_timing = json.loads(json.dumps(profiled_rows))
+        partial_timing[1]["attempts"][1]["stages"][1].pop("start_time")
+        partial_timing[1]["attempts"][1]["stages"][1].pop("end_time")
+        write_rows(malformed, partial_timing)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, "missing both timestamps on one child discarded the record")
+        partial_summary = run("--summarize", str(malformed))
+        require(partial_summary.returncode == 0, partial_summary.stderr)
+        partial_value = json.loads(partial_summary.stdout)
+        partial_group = next(group for group in partial_value["groups"] if group["profile"] == "split3")
+        require(partial_group["max_parallel_child_turns"] is None and partial_group["max_parallel_child_turns_basis"] == "unknown", "partial child timing was converted to a parallelism value")
+
+        contradictory_peak = json.loads(json.dumps(profiled_rows))
+        child_stages = contradictory_peak[1]["attempts"][1]["stages"]
+        child_stages[1]["start_time"], child_stages[1]["end_time"] = 100.0, 103.0
+        child_stages[2]["start_time"], child_stages[2]["end_time"] = 101.0, 104.0
+        child_stages[3].pop("start_time")
+        child_stages[3].pop("end_time")
+        write_rows(malformed, contradictory_peak)
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "timed child peak" in rejected.stderr, "known thread measurement accepted a contradictory timed peak")
 
         duplicate_run = json.loads(json.dumps(profiled_rows))
         duplicate_record = json.loads(json.dumps(profiled_rows[1]))
@@ -135,7 +182,7 @@ def validate_model_selection_eval() -> None:
         over_cap["attempts"][0]["max_open_threads"] = 4
         write_rows(malformed, [over_cap])
         rejected = run("--validate-results", str(malformed))
-        require(rejected.returncode == 2 and "exceeds profile current3 cap" in rejected.stderr, "profile cap overflow was accepted")
+        require(rejected.returncode == 2 and "exceeds profile split3 cap" in rejected.stderr, "profile cap overflow was accepted")
 
         live_without_provenance = json.loads(json.dumps(rows[0]))
         live_without_provenance["evidence_kind"] = "observed_model_run"

@@ -42,6 +42,17 @@ NAMED_ROLES = {
     "sentinel": {"role": "worker", "model": "gpt-5.6-luna", "reasoning_effort": "max"},
     "inquisitor": {"role": "review", "model": "gpt-6-astra", "reasoning_effort": "xhigh"},
 }
+# `current3` represents the existing three-child arrangement.  The split
+# profiles are the candidates that may use the newly added worker roles.
+# Root aliases are retained for records that use the generic accounting name.
+PROFILE_NAMED_ROLES = {
+    "solo": {"guildmaster", "root", "inquisitor"},
+    "current3": {"guildmaster", "root", "adventurer", "scholar", "inquisitor"},
+    "split3": set(NAMED_ROLES),
+    "split4": set(NAMED_ROLES),
+    "split6": set(NAMED_ROLES),
+    "split8": set(NAMED_ROLES),
+}
 STAGE_STATUSES = {"completed", "failed"}
 EVIDENCE_KINDS = {"synthetic_fixture", "manual_record", "observed_model_run"}
 MEASUREMENT_SOURCES = {"observed", "manual", "synthetic", "unknown"}
@@ -432,6 +443,7 @@ def validate_event(
     event_index: int,
     invocation_ids: set[str],
     manifest: dict[str, Any],
+    profile: str | None,
     timing_events: list[tuple[str, float, float]],
 ) -> str:
     required = {
@@ -461,14 +473,19 @@ def validate_event(
                 raise EvalError(f"{task_id} root model must remain {expected['model']}; root_override only permits effort changes")
         elif model != expected["model"] or effort != expected["reasoning_effort"]:
             raise EvalError(f"{task_id} {strategy} {role} model/effort mismatch")
+    named_role = event.get("named_role")
+    if profile is not None and named_role is None:
+        raise EvalError(f"{task_id} explicit profile {profile} requires named_role on every event")
     validate_named_role(
-        event.get("named_role"),
+        named_role,
         role,
         model,
         effort,
         root_override=root_override,
         label=f"{task_id} attempt {attempt_index} event {event_index}.named_role",
     )
+    if profile is not None and named_role not in PROFILE_NAMED_ROLES[profile]:
+        raise EvalError(f"{task_id} named_role {named_role} is not allowed by profile {profile}")
     failure = event["failure_evidence"]
     if event["status"] == "failed":
         nonempty_string(failure, f"{task_id} failed event {event_index}.failure_evidence")
@@ -580,16 +597,15 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
                     raise EvalError(f"{task_id} profile {profile} has an invalid max_open_threads")
                 if open_threads > cap:
                     raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads exceeds profile {profile} cap {cap}")
+        else:
+            open_threads = None
         events = attempt["stages"]
         if not isinstance(events, list) or not events:
             raise EvalError(f"{task_id} attempt {attempt_index} events must be non-empty")
         observed_roles: set[str] = set()
         failed = False
         timing_events: list[tuple[str, float, float]] = []
-        child_event_count = 0
         for event_index, event in enumerate(events):
-            if isinstance(event, dict) and event.get("role") in {"worker", "review"}:
-                child_event_count += 1
             role = validate_event(
                 event,
                 task_id=task_id,
@@ -600,14 +616,21 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
                 event_index=event_index,
                 invocation_ids=all_invocation_ids,
                 manifest=manifest,
+                profile=profile,
                 timing_events=timing_events,
             )
             observed_roles.add(role)
             failed = failed or event["status"] == "failed"
         if "root" not in observed_roles:
             raise EvalError(f"{task_id} attempt {attempt_index} must account for root usage")
-        if timing_events and len(timing_events) != child_event_count:
-            raise EvalError(f"{task_id} attempt {attempt_index} child turn timing is incomplete")
+        # Aggregation remains strict about a missing child interval, but
+        # validation can reject a contradiction proven by known intervals.
+        known_timed_peak = max_parallel_child_turns(timing_events) if timing_events else 0
+        if open_threads is not None and known_timed_peak > open_threads:
+            raise EvalError(
+                f"{task_id} attempt {attempt_index} timed child peak {known_timed_peak} "
+                f"exceeds measured max_open_threads {open_threads}"
+            )
         if profile is not None and timing_events:
             cap = profile_definitions(manifest)[profile]["max_open_threads"]
             if not isinstance(cap, int):
@@ -726,14 +749,13 @@ def _max_open_threads(rows: list[dict[str, Any]]) -> tuple[int | None, str]:
 
 
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    grouped: dict[tuple[str, str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         root_model, root_effort = record_root_pair(row, row["task_id"])
         profile = record_profile(row) or "unknown"
-        run_group = row.get("run_id") if isinstance(row.get("run_id"), str) else "unknown"
-        grouped[(row["evidence_kind"], row["split"], row["strategy"], profile, run_group, root_model, root_effort)].append(row)
+        grouped[(row["evidence_kind"], row["split"], row["strategy"], profile, root_model, root_effort)].append(row)
     output: dict[str, Any] = {"groups": []}
-    for (kind, split, strategy, profile, run_group, root_model, root_effort), values in sorted(grouped.items()):
+    for (kind, split, strategy, profile, root_model, root_effort), values in sorted(grouped.items()):
         total_tokens, token_basis = _sum_measurements(values, "tokens", "usage_source", {"observed", "synthetic"})
         total_codex_usage, codex_basis = _sum_measurements(values, "codex_usage", "usage_source", {"observed"})
         total_account_cost, account_cost_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"account_reported"})
@@ -803,8 +825,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "split": split,
                 "strategy": strategy,
                 "profile": profile,
-                "run_id": run_group,
-                "run_ids": sorted(record_run_id(row) for row in values),
+                "run_ids": sorted({record_run_id(row) for row in values}),
                 "run_count": len({record_run_id(row) for row in values}),
                 "root_model": root_model,
                 "root_reasoning_effort": root_effort,
@@ -847,18 +868,60 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> None:
-    represented = {(row["evidence_kind"], row["split"]) for row in rows}
-    actual = {(row["evidence_kind"], row["split"], row["task_id"], row["strategy"]) for row in rows}
-    for kind, split in represented:
+    # Legacy rows (without a profile) retain the original two-strategy matrix.
+    legacy_groups = {
+        (row["evidence_kind"], row["split"])
+        for row in rows
+        if record_profile(row) is None
+    }
+    for kind, split in legacy_groups:
         task_ids = {task["id"] for task in manifest["tasks"] if task["split"] == split}
         expected = {(kind, split, task_id, strategy) for task_id in task_ids for strategy in STRATEGIES}
+        actual = {
+            (row["evidence_kind"], row["split"], row["task_id"], row["strategy"])
+            for row in rows
+            if record_profile(row) is None
+            and row["evidence_kind"] == kind
+            and row["split"] == split
+        }
         missing = expected - actual
-        extra = {item for item in actual if item[0] == kind and item[1] == split} - expected
+        extra = actual - expected
         if missing or extra:
             raise EvalError(
                 f"{kind}/{split} result matrix is incomplete: "
                 f"missing={sorted((item[2], item[3]) for item in missing)}, "
                 f"extra={sorted((item[2], item[3]) for item in extra)}"
+            )
+
+    # Explicit profiles are independent experiment conditions.  A represented
+    # profile must cover every task in its split for that profile's strategy,
+    # while an unrepresented profile is not required.
+    profile_groups = {
+        (row["evidence_kind"], row["split"], record_profile(row))
+        for row in rows
+        if record_profile(row) is not None
+    }
+    definitions = profile_definitions(manifest)
+    for kind, split, profile in profile_groups:
+        assert profile is not None
+        definition = definitions[profile]
+        strategy = definition["strategy"]
+        task_ids = {task["id"] for task in manifest["tasks"] if task["split"] == split}
+        expected = {(kind, split, profile, task_id, strategy) for task_id in task_ids}
+        actual = {
+            (row["evidence_kind"], row["split"], profile, row["task_id"], row["strategy"])
+            for row in rows
+            if record_profile(row) == profile
+            and row["evidence_kind"] == kind
+            and row["split"] == split
+        }
+        missing = expected - actual
+        extra = actual - expected
+        if missing or extra:
+            raise EvalError(
+                f"{kind}/{split}/{profile} result matrix is incomplete: "
+                f"missing={sorted((item[3], item[4]) for item in missing)}, "
+                f"extra={sorted((item[3], item[4]) for item in extra)}"
             )
 
 

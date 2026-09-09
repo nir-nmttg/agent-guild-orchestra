@@ -11,7 +11,7 @@
 
 各タスクの`features`、`risk`、`review_required`はマニフェストで先に固定します。実際にワーカーやレビューを呼んだか、再試行したか、実行段階の順序は記録へそのまま残し、構成から固定しません。Rootの利用者による推論レベル上書きは`provenance.root_override`とRootの実行段階の有効な`model` / `reasoning_effort`へ記録します。Rootモデルは比較条件のマニフェスト指定（Astra）から変更せず、Lunaワーカーと独立レビューのモデル/推論レベルも固定します。一つの記録内ではRootモデル/推論レベル条件を再試行の間でも変えず、変更する場合は別の実行/記録として扱います。集計は有効なRootモデル/推論レベルごとにグループを分け、異なるRoot推論レベル条件を混ぜません。
 
-`model_selection_eval.yaml`の`profiles`は、`solo`（子0）、`current3`（現行上限3）、`split3`、`split4`、`split6`、`split8`を定義します。結果行の任意フィールド`profile`はこの値に、任意フィールド`run_id`は同じタスク・戦略を反復したときの一意な記録IDにします。旧記録のこれらのフィールドは欠測のまま受理し、集計では`profile: "unknown"`とします。`provenance.run_id`は従来どおり必須で、トップレベル`run_id`がない旧記録ではその値を記録IDとして使います。
+`model_selection_eval.yaml`の`profiles`は、`solo`（子枠1）、`current3`（現行上限3）、`split3`、`split4`、`split6`、`split8`を定義します。`solo`でも高リスクタスクには独立Astraレビューを記録するため、子枠は0ではありません。結果行の任意フィールド`profile`はこの値に、任意フィールド`run_id`は同じタスク・戦略を反復したときの一意な記録IDにします。旧記録のこれらのフィールドは欠測のまま受理し、集計では`profile: "unknown"`とします。`provenance.run_id`は従来どおり必須で、トップレベル`run_id`がない旧記録ではその値を記録IDとして使います。明示したプロファイルでは、すべての実行段階に`named_role`を付けます。`current3`で使える子役は`adventurer`、`scholar`、`inquisitor`（Rootは`guildmaster`または`root`）で、`verifier`と`sentinel`は`split*`プロファイルで使います。
 
 ## パイロットとホールドアウト
 
@@ -25,9 +25,9 @@
 
 JSONLの1行が1つのタスク/評価構成結果です。既存の`task_id`、`strategy`、`split`、`accepted`、`task_input`、`acceptance_evidence`、`provenance`を保持し、`grade_refs`を追加します。`attempts`は1から連番で、各試行は評価基準の結果としての`accepted`、`wall_time_seconds`、`wall_time_source`、実行した`stages`を持ちます。`accepted=false`は、失敗した実行段階と`failure_evidence`を伴う実行エラー、または全実行段階が`completed`でも評価基準を満たさない品質失敗のどちらも記録できます。再試行前の品質失敗も分母から除かず、最終試行の結果は記録の`accepted`と一致させます。
 
-各実行段階は`sequence`、一意の`invocation_id`、`role`（`root` / `worker` / `review`）、有効な`model` / `reasoning_effort`、`status`、`failure_evidence`、`usage`、`elapsed_seconds`、再現可能な`evidence_refs`を持ちます。新しい記録では任意の`named_role`（`guildmaster` / `scholar` / `adventurer` / `verifier` / `sentinel` / `inquisitor`）を付けられます。Verifier/Sentinelは会計上`worker`、AstraのInquisitorは`review`です。役名を付けた場合は対応するモデル・推論レベルと会計ロールの一致を検証します。`sequence`は記録された実行順を表します。Astra-onlyのワーカーは拒否されますが、Astra+Lunaのワーカー数は0以上です。タスクの`review_required`が`true`なら最終試行へレビューを含めます。並列実行や再試行の数をこのバリデーターが知らないため、実際の全呼び出しを記録する責任は実行担当/Rootに残ります。
+各実行段階は`sequence`、一意の`invocation_id`、`role`（`root` / `worker` / `review`）、有効な`model` / `reasoning_effort`、`status`、`failure_evidence`、`usage`、`elapsed_seconds`、再現可能な`evidence_refs`を持ちます。`named_role`は`guildmaster` / `root` / `scholar` / `adventurer` / `verifier` / `sentinel` / `inquisitor`のいずれかで、明示したプロファイルでは必須、旧形式（プロファイルなし）では任意です。Verifier/Sentinelは会計上`worker`、AstraのInquisitorは`review`です。役名を付けた場合は対応するモデル・推論レベルと会計ロールの一致を検証し、プロファイルが役割を制限する場合はその制限も検証します。`sequence`は記録された実行順を表します。Astra-onlyのワーカーは拒否されますが、Astra+Lunaのワーカー数は0以上です。タスクの`review_required`が`true`なら最終試行へレビューを含めます。並列実行や再試行の数をこのバリデーターが知らないため、実際の全呼び出しを記録する責任は実行担当/Rootに残ります。
 
-子ターンの実時間を測る場合だけ、イベントへ`start_time`と`end_time`をペアで記録します。値は非負の数値、またはタイムゾーン付きISO-8601です。集計の`max_parallel_child_turns`はこの区間の重なりから算出したworker/reviewターンの最大数であり、設定枠の「開いたthread数」ではありません。設定枠を観測できた場合は試行へ`max_open_threads`と`max_open_threads_source`を記録し、別の集計値として出します。片方だけの時刻、逆順の時刻、欠測した一部の子ターン、プロファイル上限超過は拒否します。旧記録や不完全な新記録の集計値は`unknown`で、0へ変換しません。
+子ターンの実時間を測る場合だけ、イベントへ`start_time`と`end_time`をペアで記録します。値は非負の数値、またはタイムゾーン付きISO-8601です。片方だけの時刻、逆順の時刻は拒否します。両方を`null`にするか両方を欠測にした子ターンは受理しますが、他の子ターンだけ時刻があっても、その試行の`max_parallel_child_turns`は`unknown`として集計し、失敗や使用量の分母から行を外しません。集計の`max_parallel_child_turns`は区間の重なりから算出したworker/reviewターンの最大数であり、設定枠の「開いたthread数」ではありません。設定枠を観測できた場合は試行へ`max_open_threads`と`max_open_threads_source`を記録し、別の集計値として出します。既知の時間区間から求めたピークが測定した`max_open_threads`より大きい場合は記録を拒否します。プロファイル上限超過も拒否します。旧記録や不完全な新記録の集計値は`unknown`で、0へ変換しません。
 
 `usage`は`tokens`、ホストから得た`codex_usage`、`api_cost_usd`、各`source`を分けます。欠測は`null`とし、欠測を0へ変換しません。観測したCodex使用量とAPI費用の米ドル推定値・アカウントから報告された費用は別集計で、API価格表、価格DB、費用推定を行う実行機構は持ちません。必要な使用量が一つでも不明なら該当合計は`unknown`で、単純な費用差から費用削減を主張しません。実経過時間も実行段階合計ではなく試行単位で記録します。
 出典は証拠種別と一致させます。`synthetic_fixture`は`synthetic`/`unknown`、`manual_record`は`manual`/`unknown`、`observed_model_run`は使用量と実経過時間が`observed`/`unknown`、費用が`account_reported`/`api_estimate`/`unknown`です。これにより、合成値が観測された使用量やアカウントから報告された費用として集計されません。
@@ -38,6 +38,6 @@ python3 scripts/model_selection_eval.py --validate-results /path/to/results.json
 python3 scripts/model_selection_eval.py --summarize /path/to/results.jsonl
 ~~~
 
-集計は有効なRootモデル/推論レベルと`profile`ごとにグループを分け、`run_ids`、タスク分母を保った合格件数（`accepted`）、試行/実行段階/レビュー/ワーカー件数、役割別usage、出典付きトークン、Codex使用量、API費用、実経過時間、開いたthreadの最大数、子ターンの実並列数を出します。役割別usageは従来の全体usageと併記します。統計的優越、非劣性、費用削減を自動で主張しません。パイロット/ホールドアウトの比較には、同じ検証、外部評価、実際の権限/モデル/新しいコンテキストのイベント、全再試行/失敗、適切なホスト使用量の証拠が必要です。
+集計は有効なRootモデル/推論レベルと`profile`ごとにグループを分け、各グループの`run_ids`（反復ID）を保持します。グループを反復IDごとに分割しないため、同じタスクの複数回実行もタスク分母へ残ります。タスク分母を保った合格件数（`accepted`）、試行/実行段階/レビュー/ワーカー件数、役割別usage、出典付きトークン、Codex使用量、API費用、実経過時間、開いたthreadの最大数、子ターンの実並列数を出します。役割別usageは従来の全体usageと併記します。プロファイルを付けない旧記録は、splitごとに従来どおり両戦略・全タスクの行を要求します。明示したプロファイルは、表された各プロファイルについて、そのプロファイルの戦略のsplit内全タスクを要求します。未使用のプロファイルまで実施することは要求しません。統計的優越、非劣性、費用削減を自動で主張しません。パイロット/ホールドアウトの比較には、同じ検証、外部評価、実際の権限/モデル/新しいコンテキストのイベント、全再試行/失敗、適切なホスト使用量の証拠が必要です。
 
 `scripts/validation/fixtures/model_eval_offline.jsonl`は`synthetic`と明記したパイロットフィクスチャです。直接実装・レビューなし、状況に応じた委譲でワーカーなし、重大なリスクのレビュー、複数ワーカー、再試行前の品質失敗、最終品質失敗、誤った役割・モデル・実行順、呼び出しの重複、失敗の証拠の欠落、Root推論レベル上書き、実行を観測した記録の来歴のバリデーター経路を確認します。これは実際のベンチマークではなく、品質、ホスト割り当て上限、API費用、費用削減の証拠ではありません。
