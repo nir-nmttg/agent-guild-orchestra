@@ -29,10 +29,15 @@ PROFILE_CAPS = {
     "solo": {"strategy": "astra_only", "max_open_threads": 1},
     "current3": {"strategy": "astra_luna", "max_open_threads": 3},
     "split3": {"strategy": "astra_luna", "max_open_threads": 3},
+    "flow3": {"strategy": "astra_luna", "max_open_threads": 3},
     "split4": {"strategy": "astra_luna", "max_open_threads": 4},
     "split6": {"strategy": "astra_luna", "max_open_threads": 6},
     "split8": {"strategy": "astra_luna", "max_open_threads": 8},
 }
+LEGACY_PROFILE_CAPS = {
+    profile: definition for profile, definition in PROFILE_CAPS.items() if profile != "flow3"
+}
+PROFILE_NAME_SETS = (set(LEGACY_PROFILE_CAPS), set(PROFILE_CAPS))
 NAMED_ROLES = {
     "guildmaster": {"role": "root", "model": "gpt-6-astra", "reasoning_effort": "high"},
     "root": {"role": "root", "model": "gpt-6-astra", "reasoning_effort": "high"},
@@ -43,12 +48,13 @@ NAMED_ROLES = {
     "inquisitor": {"role": "review", "model": "gpt-6-astra", "reasoning_effort": "xhigh"},
 }
 # `current3` represents the existing three-child arrangement.  The split
-# profiles are the candidates that may use the newly added worker roles.
+# and flow profiles are the candidates that may use the newly added worker roles.
 # Root aliases are retained for records that use the generic accounting name.
 PROFILE_NAMED_ROLES = {
     "solo": {"guildmaster", "root", "inquisitor"},
     "current3": {"guildmaster", "root", "adventurer", "scholar", "inquisitor"},
     "split3": set(NAMED_ROLES),
+    "flow3": set(NAMED_ROLES),
     "split4": set(NAMED_ROLES),
     "split6": set(NAMED_ROLES),
     "split8": set(NAMED_ROLES),
@@ -77,9 +83,19 @@ SOURCE_POLICIES = {
         "cost": {"account_reported", "api_estimate", "unknown"},
     },
 }
-OPTIONAL_RECORD_FIELDS = {"profile", "run_id"}
-OPTIONAL_ATTEMPT_FIELDS = {"max_open_threads", "max_open_threads_source"}
+OPTIONAL_RECORD_FIELDS = {"profile", "run_id", "major_miss_count"}
+OPTIONAL_ATTEMPT_FIELDS = {
+    "max_open_threads",
+    "max_open_threads_source",
+    "timing_breakdown",
+}
 OPTIONAL_EVENT_FIELDS = {"named_role", "start_time", "end_time"}
+TIMING_BREAKDOWN_METRICS = (
+    "dependency_wait_seconds",
+    "handoff_seconds",
+    "rework_seconds",
+)
+TIMING_BREAKDOWN_FIELDS = {*TIMING_BREAKDOWN_METRICS, "source"}
 
 
 class EvalError(RuntimeError):
@@ -121,6 +137,37 @@ def optional_integer(value: object, label: str) -> int | None:
     return value
 
 
+def validate_timing_breakdown(
+    value: object,
+    *,
+    label: str,
+    evidence_kind: str,
+    wall_time_seconds: float | None,
+) -> None:
+    """Validate optional attempt timing categories without treating them as task time."""
+    if not isinstance(value, dict) or set(value) != TIMING_BREAKDOWN_FIELDS:
+        raise EvalError(f"{label} must contain exactly the timing metrics and source")
+    source = value["source"]
+    if not isinstance(source, str) or source not in MEASUREMENT_SOURCES:
+        raise EvalError(f"{label}.source is invalid")
+    if source not in SOURCE_POLICIES[evidence_kind]["wall"]:
+        raise EvalError(f"{label}.source is inconsistent with {evidence_kind}")
+
+    durations = [
+        optional_number(value[metric], f"{label}.{metric}")
+        for metric in TIMING_BREAKDOWN_METRICS
+    ]
+    if all(duration is None for duration in durations):
+        if source not in {"unknown", "synthetic"}:
+            raise EvalError(f"{label}.source must be unknown when all timing metrics are null")
+    elif source == "unknown":
+        raise EvalError(f"{label}.source must identify known timing metrics")
+    if wall_time_seconds is not None:
+        for metric, duration in zip(TIMING_BREAKDOWN_METRICS, durations):
+            if duration is not None and duration > wall_time_seconds:
+                raise EvalError(f"{label}.{metric} may not exceed known attempt wall time")
+
+
 def timestamp_seconds(value: object, label: str) -> float:
     """Parse a monotonic numeric or timezone-qualified ISO-8601 timestamp."""
     if isinstance(value, bool):
@@ -149,7 +196,7 @@ def profile_definitions(manifest: dict[str, Any]) -> dict[str, dict[str, object]
     profiles = manifest.get("profiles")
     if isinstance(profiles, dict):
         return profiles
-    return PROFILE_CAPS
+    return LEGACY_PROFILE_CAPS
 
 
 def record_profile(record: dict[str, Any]) -> str | None:
@@ -274,8 +321,10 @@ def validate_manifest(value: dict[str, Any]) -> None:
 
     profiles = value.get("profiles")
     if profiles is not None:
-        if not isinstance(profiles, dict) or set(profiles) != set(PROFILE_CAPS):
-            raise EvalError(f"profiles must be exactly {sorted(PROFILE_CAPS)}")
+        if not isinstance(profiles, dict) or set(profiles) not in PROFILE_NAME_SETS:
+            raise EvalError(
+                "profiles must use the legacy six-profile set or the current seven-profile set"
+            )
         for profile, definition in profiles.items():
             if not isinstance(definition, dict) or set(definition) != {"strategy", "max_open_threads"}:
                 raise EvalError(f"profile {profile} must declare strategy and max_open_threads")
@@ -545,6 +594,8 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
     grade_refs = record["grade_refs"]
     if not isinstance(grade_refs, list) or not grade_refs or any(not isinstance(ref, str) or not ref.strip() for ref in grade_refs):
         raise EvalError(f"{task_id} grade_refs must contain reproducible test/diff/grade references")
+    if "major_miss_count" in record:
+        optional_integer(record["major_miss_count"], f"{task_id} major_miss_count")
 
     evidence = record["acceptance_evidence"]
     criteria = task["acceptance"]
@@ -573,7 +624,10 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
             raise EvalError(f"{task_id} attempts must be sequential and carry boolean accepted")
         if attempt_index < len(attempts) and attempt["accepted"]:
             raise EvalError(f"{task_id} only the final attempt may be accepted")
-        optional_number(attempt["wall_time_seconds"], f"{task_id} attempt {attempt_index} wall_time_seconds")
+        wall_time_seconds = optional_number(
+            attempt["wall_time_seconds"],
+            f"{task_id} attempt {attempt_index} wall_time_seconds",
+        )
         if attempt["wall_time_source"] not in MEASUREMENT_SOURCES:
             raise EvalError(f"{task_id} attempt {attempt_index} wall_time_source is invalid")
         if attempt["wall_time_source"] not in SOURCE_POLICIES[kind]["wall"]:
@@ -599,6 +653,13 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
                     raise EvalError(f"{task_id} attempt {attempt_index} max_open_threads exceeds profile {profile} cap {cap}")
         else:
             open_threads = None
+        if "timing_breakdown" in attempt:
+            validate_timing_breakdown(
+                attempt["timing_breakdown"],
+                label=f"{task_id} attempt {attempt_index} timing_breakdown",
+                evidence_kind=kind,
+                wall_time_seconds=wall_time_seconds,
+            )
         events = attempt["stages"]
         if not isinstance(events, list) or not events:
             raise EvalError(f"{task_id} attempt {attempt_index} events must be non-empty")
@@ -694,6 +755,114 @@ def _sum_wall_time(rows: list[dict[str, Any]]) -> tuple[float | None, str]:
     return sum(values), next(iter(sources)) if len(sources) == 1 else "mixed"
 
 
+KNOWN_TIME_SOURCES = {"observed", "manual", "synthetic"}
+
+
+def _task_wall_time_distribution(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize complete task totals while preserving cohort-level missingness."""
+    totals: list[float] = []
+    sources: set[str] = set()
+    unknown_count = 0
+    for row in rows:
+        task_values: list[float] = []
+        task_sources: set[str] = set()
+        complete = True
+        for attempt in row["attempts"]:
+            value = attempt["wall_time_seconds"]
+            source = attempt["wall_time_source"]
+            if value is None or source not in KNOWN_TIME_SOURCES:
+                complete = False
+                continue
+            task_values.append(float(value))
+            task_sources.add(source)
+        if not complete:
+            unknown_count += 1
+            continue
+        totals.append(sum(task_values))
+        sources.update(task_sources)
+
+    known_count = len(totals)
+    if unknown_count or not totals:
+        median: float | None = None
+        p90: float | None = None
+        maximum: float | None = None
+    else:
+        ordered = sorted(totals)
+        midpoint = len(ordered) // 2
+        if len(ordered) % 2:
+            median = ordered[midpoint]
+        else:
+            median = (ordered[midpoint - 1] + ordered[midpoint]) / 2
+        # Nearest-rank p90: rank = ceil(0.90 * n), with ranks starting at 1.
+        rank = max(1, math.ceil(0.90 * len(ordered)))
+        p90 = ordered[rank - 1]
+        maximum = ordered[-1]
+    basis = (
+        _measurement_basis(sources, allowed=KNOWN_TIME_SOURCES)
+        if known_count and not unknown_count
+        else "unknown"
+    )
+    return {
+        "known_count": known_count,
+        "unknown_count": unknown_count,
+        "median": median,
+        "p90": p90,
+        "max": maximum,
+        "p90_method": "nearest_rank",
+        "basis": basis,
+    }
+
+
+def _sum_timing_metric(rows: list[dict[str, Any]], metric: str) -> tuple[float | None, str]:
+    values: list[float] = []
+    sources: set[str] = set()
+    complete = True
+    saw_breakdown = False
+    for row in rows:
+        for attempt in row["attempts"]:
+            timing = attempt.get("timing_breakdown")
+            if timing is None:
+                complete = False
+                continue
+            saw_breakdown = True
+            value = timing[metric]
+            source = timing["source"]
+            sources.add(source)
+            if value is None or source not in KNOWN_TIME_SOURCES:
+                complete = False
+            else:
+                values.append(float(value))
+    if not saw_breakdown or not complete or not values:
+        return None, "unknown"
+    return sum(values), _measurement_basis(sources, allowed=KNOWN_TIME_SOURCES)
+
+
+def _timing_breakdown_totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    totals: dict[str, Any] = {}
+    for metric in TIMING_BREAKDOWN_METRICS:
+        value, basis = _sum_timing_metric(rows, metric)
+        totals[metric] = value
+        totals[f"{metric}_basis"] = basis
+    return totals
+
+
+def _major_miss_total(rows: list[dict[str, Any]], evidence_kind: str) -> tuple[int | None, str]:
+    values: list[int] = []
+    for row in rows:
+        value = row.get("major_miss_count")
+        if value is None:
+            return None, "unknown"
+        values.append(value)
+    if not values:
+        return None, "unknown"
+    basis_by_kind = {
+        "synthetic_fixture": "synthetic",
+        "manual_record": "manual",
+        "observed_model_run": "observed",
+    }
+    return sum(values), basis_by_kind.get(evidence_kind, "unknown")
+
+
 def _measurement_basis(sources: set[str], *, allowed: set[str]) -> str:
     if not sources or not sources.issubset(allowed):
         return "unknown"
@@ -763,8 +932,12 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         total_wall, wall_basis = _sum_wall_time(values)
         max_parallel, parallel_basis = _max_parallel_child_turns(values)
         max_open, open_basis = _max_open_threads(values)
+        task_wall_time = _task_wall_time_distribution(values)
+        timing_breakdown = _timing_breakdown_totals(values)
+        major_miss_count, major_miss_basis = _major_miss_total(values, kind)
         assigned = len(values)
         accepted = sum(1 for row in values if row["accepted"])
+        first_attempt_accepted = sum(1 for row in values if row["attempts"][0]["accepted"])
         event_count = sum(len(attempt["stages"]) for row in values for attempt in row["attempts"])
         workers = sum(
             1 for row in values for attempt in row["attempts"] for event in attempt["stages"] if event["role"] == "worker"
@@ -832,6 +1005,8 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "assigned_tasks": assigned,
                 "accepted_tasks": accepted,
                 "acceptance_rate": accepted / assigned,
+                "first_attempt_accepted_tasks": first_attempt_accepted,
+                "first_attempt_acceptance_rate": first_attempt_accepted / assigned,
                 "attempts": sum(len(row["attempts"]) for row in values),
                 "event_count": event_count,
                 "worker_events": workers,
@@ -846,6 +1021,10 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "api_estimate_basis": api_estimate_basis,
                 "total_wall_time_seconds": total_wall,
                 "wall_time_basis": wall_basis,
+                "task_wall_time_seconds": task_wall_time,
+                "timing_breakdown": timing_breakdown,
+                "major_miss_count": major_miss_count,
+                "major_miss_count_basis": major_miss_basis,
                 "max_open_threads": max_open,
                 "max_open_threads_basis": open_basis,
                 "max_parallel_child_turns": max_parallel,

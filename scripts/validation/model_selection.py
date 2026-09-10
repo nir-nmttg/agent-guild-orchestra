@@ -29,7 +29,7 @@ def validate_model_selection_eval() -> None:
     manifest = json.loads(plan.stdout)
     require(set(manifest["strategies"]) == {"astra_only", "astra_luna"}, "benchmark strategy matrix mismatch")
     require(
-        set(manifest["profiles"]) == {"solo", "current3", "split3", "split4", "split6", "split8"},
+        set(manifest["profiles"]) == {"solo", "current3", "split3", "flow3", "split4", "split6", "split8"},
         "parallel execution profiles are not explicit",
     )
     require(all("risk" in task and "review_required" in task for task in manifest["tasks"]), "task routing policy is not explicit")
@@ -60,6 +60,38 @@ def validate_model_selection_eval() -> None:
     rows = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line]
     with tempfile.TemporaryDirectory(prefix="agent-guild-model-eval-") as directory:
         malformed = Path(directory) / "invalid.jsonl"
+
+        legacy_manifest = json.loads(json.dumps(manifest))
+        legacy_manifest["profiles"].pop("flow3")
+        legacy_manifest_path = Path(directory) / "legacy-manifest.yaml"
+        legacy_manifest_path.write_text(json.dumps(legacy_manifest, ensure_ascii=False), encoding="utf-8")
+        legacy_valid = run(
+            "--manifest",
+            str(legacy_manifest_path),
+            "--validate-results",
+            str(fixture),
+        )
+        require(legacy_valid.returncode == 0, legacy_valid.stderr)
+        legacy_summary = run(
+            "--manifest",
+            str(legacy_manifest_path),
+            "--summarize",
+            str(fixture),
+        )
+        require(legacy_summary.returncode == 0, legacy_summary.stderr)
+        require(json.loads(legacy_summary.stdout) == value, "legacy six-profile manifest changed fixture summary")
+
+        no_profiles_manifest = json.loads(json.dumps(manifest))
+        no_profiles_manifest.pop("profiles")
+        no_profiles_manifest_path = Path(directory) / "no-profiles-manifest.yaml"
+        no_profiles_manifest_path.write_text(json.dumps(no_profiles_manifest, ensure_ascii=False), encoding="utf-8")
+        no_profiles_valid = run(
+            "--manifest",
+            str(no_profiles_manifest_path),
+            "--validate-results",
+            str(fixture),
+        )
+        require(no_profiles_valid.returncode == 0, no_profiles_valid.stderr)
 
         # Profiled synthetic records exercise the optional schema without
         # changing the legacy fixture used above.
@@ -332,3 +364,254 @@ def validate_model_selection_eval() -> None:
         require(observed_summary.returncode == 0, observed_summary.stderr)
         observed_value = json.loads(observed_summary.stdout)
         require(any(group["cost_basis"] == "account_reported" and group["total_cost_usd"] is not None for group in observed_value["groups"]), "observed account cost was not separated in summary")
+
+        # New additive metrics keep legacy rows valid while counting every
+        # attempt, including retries and a terminal failure.
+        timed_rows = json.loads(json.dumps(rows))
+        for row in timed_rows:
+            miss_count = (
+                1 if row["strategy"] == "astra_luna" and row["task_id"] == "pilot-installer-conflict"
+                else 2 if row["strategy"] == "astra_luna"
+                else 0 if row["task_id"] == "pilot-installer-conflict"
+                else None
+            )
+            row["major_miss_count"] = miss_count
+            for attempt_index, attempt in enumerate(row["attempts"], 1):
+                attempt["timing_breakdown"] = {
+                    "dependency_wait_seconds": 0.0,
+                    "handoff_seconds": 1.0,
+                    "rework_seconds": None if attempt_index == 1 and row["strategy"] == "astra_luna" else 1.0,
+                    "source": "synthetic",
+                }
+        write_rows(malformed, timed_rows)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, accepted.stderr)
+        timed_summary = run("--summarize", str(malformed))
+        require(timed_summary.returncode == 0, timed_summary.stderr)
+        timed_value = json.loads(timed_summary.stdout)
+        timed_luna = next(
+            group for group in timed_value["groups"]
+            if group["strategy"] == "astra_luna"
+        )
+        timed_astra = next(
+            group for group in timed_value["groups"]
+            if group["strategy"] == "astra_only"
+        )
+        require(
+            timed_luna["first_attempt_accepted_tasks"] == 1
+            and timed_luna["first_attempt_acceptance_rate"] == 0.5,
+            "first-attempt acceptance ignored retries",
+        )
+        require(
+            timed_luna["task_wall_time_seconds"] == {
+                "known_count": 2,
+                "unknown_count": 0,
+                "median": 6.0,
+                "p90": 10.0,
+                "max": 10.0,
+                "p90_method": "nearest_rank",
+                "basis": "synthetic",
+            },
+            "task wall distribution did not sum all attempts",
+        )
+        require(
+            timed_luna["timing_breakdown"]["dependency_wait_seconds"] == 0.0
+            and timed_luna["timing_breakdown"]["dependency_wait_seconds_basis"] == "synthetic"
+            and timed_luna["timing_breakdown"]["handoff_seconds"] == 3.0
+            and timed_luna["timing_breakdown"]["rework_seconds"] is None
+            and timed_luna["timing_breakdown"]["rework_seconds_basis"] == "unknown",
+            "timing categories lost zero or missing provenance",
+        )
+        require(
+            timed_luna["major_miss_count"] == 3
+            and timed_luna["major_miss_count_basis"] == "synthetic"
+            and timed_astra["major_miss_count"] is None
+            and timed_astra["major_miss_count_basis"] == "unknown",
+            "major miss totals did not propagate unknowns",
+        )
+
+        explicit_zero = json.loads(json.dumps(timed_rows))
+        for row in explicit_zero:
+            if row["strategy"] == "astra_only":
+                row["major_miss_count"] = 0
+        write_rows(malformed, explicit_zero)
+        explicit_zero_summary = run("--summarize", str(malformed))
+        require(explicit_zero_summary.returncode == 0, explicit_zero_summary.stderr)
+        explicit_zero_value = json.loads(explicit_zero_summary.stdout)
+        explicit_zero_group = next(group for group in explicit_zero_value["groups"] if group["strategy"] == "astra_only")
+        require(
+            explicit_zero_group["major_miss_count"] == 0
+            and explicit_zero_group["major_miss_count_basis"] == "synthetic",
+            "explicit zero major misses became unknown",
+        )
+
+        for invalid_count in (True, -1, 1.5, "1"):
+            invalid_major_miss = json.loads(json.dumps(rows[1]))
+            invalid_major_miss["major_miss_count"] = invalid_count
+            write_rows(malformed, [invalid_major_miss])
+            rejected = run("--validate-results", str(malformed))
+            require(
+                rejected.returncode == 2 and "major_miss_count" in rejected.stderr,
+                "invalid major miss count was accepted",
+            )
+
+        missing_wall = json.loads(json.dumps(rows))
+        missing_wall[1]["attempts"][0]["wall_time_seconds"] = None
+        missing_wall[1]["attempts"][0]["wall_time_source"] = "unknown"
+        write_rows(malformed, missing_wall)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, accepted.stderr)
+        missing_wall_summary = run("--summarize", str(malformed))
+        require(missing_wall_summary.returncode == 0, missing_wall_summary.stderr)
+        missing_wall_value = json.loads(missing_wall_summary.stdout)
+        missing_luna = next(group for group in missing_wall_value["groups"] if group["strategy"] == "astra_luna")
+        require(
+            missing_luna["task_wall_time_seconds"] == {
+                "known_count": 1,
+                "unknown_count": 1,
+                "median": None,
+                "p90": None,
+                "max": None,
+                "p90_method": "nearest_rank",
+                "basis": "unknown",
+            },
+            "missing task timing was silently dropped from cohort quantiles",
+        )
+
+        # A failed final attempt remains in the all-attempt task-time total.
+        terminal_failure = json.loads(json.dumps(rows))
+        terminal_row = next(row for row in terminal_failure if row["strategy"] == "astra_luna" and row["task_id"] == "pilot-installer-conflict")
+        terminal_row["provenance"]["run_id"] = "synthetic-terminal-failure"
+        terminal_row["accepted"] = False
+        for item in terminal_row["acceptance_evidence"]:
+            item["passed"] = False
+        terminal_attempt = terminal_row["attempts"][-1]
+        terminal_attempt["accepted"] = False
+        terminal_attempt["wall_time_seconds"] = 11.0
+        failed_stage = terminal_attempt["stages"][1]
+        failed_stage["status"] = "failed"
+        failed_stage["failure_evidence"] = "合成テストデータ上の最終試行失敗"
+        write_rows(malformed, terminal_failure)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, accepted.stderr)
+        terminal_summary = run("--summarize", str(malformed))
+        require(terminal_summary.returncode == 0, terminal_summary.stderr)
+        terminal_value = json.loads(terminal_summary.stdout)
+        terminal_luna = next(group for group in terminal_value["groups"] if group["strategy"] == "astra_luna")
+        require(
+            terminal_luna["accepted_tasks"] == 1
+            and terminal_luna["task_wall_time_seconds"]["max"] == 14.0,
+            "terminal failure or slow retry was omitted from task timing",
+        )
+
+        # Ten unequal task totals distinguish nearest-rank p90 from always
+        # selecting the maximum.
+        p90_rows = [row for row in json.loads(json.dumps(rows)) if row["strategy"] == "astra_only"]
+        luna_rows = [row for row in rows if row["strategy"] == "astra_luna"]
+        for clone_index, (installer_total, boundary_total) in enumerate(zip((10, 20, 30, 40, 50), (1, 2, 3, 4, 5))):
+            for source_row, total in zip(luna_rows, (installer_total, boundary_total)):
+                clone = json.loads(json.dumps(source_row))
+                clone["run_id"] = f"p90-{clone_index}-{clone['task_id']}"
+                clone["provenance"]["run_id"] = f"p90-provenance-{clone_index}-{clone['task_id']}"
+                for attempt_index, attempt in enumerate(clone["attempts"]):
+                    attempt["wall_time_seconds"] = (
+                        total
+                        if len(clone["attempts"]) == 1
+                        else total * (0.4 if attempt_index == 0 else 0.6)
+                    )
+                    for event in attempt["stages"]:
+                        event["invocation_id"] += f"-p90-{clone_index}-{attempt_index}"
+                p90_rows.append(clone)
+        write_rows(malformed, p90_rows)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, accepted.stderr)
+        p90_summary = run("--summarize", str(malformed))
+        require(p90_summary.returncode == 0, p90_summary.stderr)
+        p90_value = json.loads(p90_summary.stdout)
+        p90_luna = next(group for group in p90_value["groups"] if group["strategy"] == "astra_luna")
+        require(
+            p90_luna["task_wall_time_seconds"]["known_count"] == 10
+            and p90_luna["task_wall_time_seconds"]["p90"] == 40.0
+            and p90_luna["task_wall_time_seconds"]["max"] == 50.0,
+            "nearest-rank p90 was not distinguished from the maximum",
+        )
+
+        # flow3 shares split3's full named-role set while current3 remains
+        # restricted to its historical roles.
+        flow_rows = json.loads(json.dumps(profiled_rows))
+        flow_rows = [row for row in flow_rows if row["strategy"] == "astra_luna"]
+        for row_index, row in enumerate(flow_rows):
+            row["profile"] = "flow3"
+            row["run_id"] = f"flow3-{row_index}"
+            row["provenance"]["run_id"] = f"flow3-provenance-{row_index}"
+            worker_index = 0
+            for attempt in row["attempts"]:
+                for event in attempt["stages"]:
+                    event["invocation_id"] += f"-flow3-{row_index}"
+                    if event["role"] == "worker":
+                        event["named_role"] = ("verifier", "sentinel", "adventurer")[worker_index % 3]
+                        worker_index += 1
+        write_rows(malformed, flow_rows)
+        accepted = run("--validate-results", str(malformed))
+        require(accepted.returncode == 0, accepted.stderr)
+        rejected = run(
+            "--manifest",
+            str(legacy_manifest_path),
+            "--validate-results",
+            str(malformed),
+        )
+        require(
+            rejected.returncode == 2 and "profile is unsupported: flow3" in rejected.stderr,
+            "flow3 rows were accepted by a manifest that does not declare flow3",
+        )
+
+        # Explicit timing values must remain finite, non-negative, and source
+        # consistent; a known duration may not exceed known wall time.
+        invalid_timing_cases = []
+        for metric, value in (("dependency_wait_seconds", True), ("handoff_seconds", -1.0), ("rework_seconds", float("inf"))):
+            invalid = json.loads(json.dumps(rows[1]))
+            invalid["attempts"][0]["timing_breakdown"] = {
+                "dependency_wait_seconds": 0.0,
+                "handoff_seconds": 0.0,
+                "rework_seconds": 0.0,
+                "source": "synthetic",
+            }
+            invalid["attempts"][0]["timing_breakdown"][metric] = value
+            invalid_timing_cases.append(invalid)
+        for invalid in invalid_timing_cases:
+            write_rows(malformed, [invalid])
+            rejected = run("--validate-results", str(malformed))
+            require(rejected.returncode == 2 and "timing_breakdown" in rejected.stderr, "invalid timing value was accepted")
+
+        invalid_source = json.loads(json.dumps(rows[1]))
+        invalid_source["attempts"][0]["timing_breakdown"] = {
+            "dependency_wait_seconds": 0.0,
+            "handoff_seconds": 0.0,
+            "rework_seconds": 0.0,
+            "source": [],
+        }
+        write_rows(malformed, [invalid_source])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "source is invalid" in rejected.stderr, "unhashable timing source was not rejected cleanly")
+
+        source_violation = json.loads(json.dumps(rows[1]))
+        source_violation["attempts"][0]["timing_breakdown"] = {
+            "dependency_wait_seconds": 0.0,
+            "handoff_seconds": 0.0,
+            "rework_seconds": 0.0,
+            "source": "observed",
+        }
+        write_rows(malformed, [source_violation])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "inconsistent with synthetic_fixture" in rejected.stderr, "timing source violation was accepted")
+
+        over_wall = json.loads(json.dumps(rows[1]))
+        over_wall["attempts"][0]["timing_breakdown"] = {
+            "dependency_wait_seconds": 4.0,
+            "handoff_seconds": 0.0,
+            "rework_seconds": 0.0,
+            "source": "synthetic",
+        }
+        write_rows(malformed, [over_wall])
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "exceed known attempt wall time" in rejected.stderr, "timing greater than wall time was accepted")

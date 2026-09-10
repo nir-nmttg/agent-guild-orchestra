@@ -16,6 +16,7 @@
     "solo": {"strategy": "astra_only", "max_open_threads": 1},
     "current3": {"strategy": "astra_luna", "max_open_threads": 3},
     "split3": {"strategy": "astra_luna", "max_open_threads": 3},
+    "flow3": {"strategy": "astra_luna", "max_open_threads": 3},
     "split4": {"strategy": "astra_luna", "max_open_threads": 4},
     "split6": {"strategy": "astra_luna", "max_open_threads": 6},
     "split8": {"strategy": "astra_luna", "max_open_threads": 8}
