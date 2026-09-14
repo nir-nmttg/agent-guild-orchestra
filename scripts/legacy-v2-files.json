@@ -1,0 +1,357 @@
+{
+  "schema": 1,
+  "versions": [
+    "2.0.0",
+    "2.1.0",
+    "2.2.0",
+    "2.3.0",
+    "2.4.0"
+  ],
+  "files": {
+    ".agents/orchestra/README.md": [
+      "74beab1e106961333bae3d8db1f9c601c4c99b31da6be1107a92b128ce429197",
+      "e67f2fb88b8e804160a4d5192e8dd2e23aad74e7780be523c937e3818291fabe"
+    ],
+    ".agents/orchestra/config/settings.yaml": [
+      "2c8fef5aa7a99bf1f3582758b480f620234f7e0a330b15b239f6e665d6129481",
+      "529566988decaa8cd1d358d55934fd3a1f846fe2d24ed3d3b6ed4fe98b379d3e",
+      "b5e93cf1df94079e495adffdd9bc1d0a6b9b15024f46b8b45eb8858568b39735",
+      "bf5e4995fb9fee5611f01ddab3a1c75b1eb4464a39e01b35834a4e994e8fc199"
+    ],
+    ".agents/orchestra/dashboard.md": [
+      "bfd8c14451dd3e6c317ed9e0e65eee6c21fe6e920ff0ca9c22d61038f1d458a1"
+    ],
+    ".agents/orchestra/docker/.dockerignore": [
+      "fde21e161a3f6174451de4e3dac60441d13a342fafc721f6eb8b939014f485ff"
+    ],
+    ".agents/orchestra/docker/Dockerfile": [
+      "b1e51d17d93a44bc7a10164e44995ae5606808c1c308b1d932365ffb81eefa5f"
+    ],
+    ".agents/orchestra/docker/requirements.txt": [
+      "a455088d4c865c755f655d0b45c11166c60fe10df07edc5703139700e55d4139"
+    ],
+    ".agents/orchestra/docs/agent-memory.md": [
+      "a5cdc1da6a07eb1ee2192e7f9c6dd6bb6871e0b40652d4fc7a68877260872a3a"
+    ],
+    ".agents/orchestra/instructions/adventurer.md": [
+      "9ebccad793335ee9fe991cbf41fd55f66d32137e57d1e2504039f1ce000894e4",
+      "f981a200b9a67c17a5080ae0d97cc4a8df21c3b45ad6a49c0b5a7250a59becf8"
+    ],
+    ".agents/orchestra/instructions/artificer.md": [
+      "f076a02298ed4dff7c596c1ca6efc8d94929af0184643c6a8af9679b7f97271e"
+    ],
+    ".agents/orchestra/instructions/captain.md": [
+      "83b16692afff911e9b9ad153074e5775629962254ac426d05298c9ad69ee4ed4"
+    ],
+    ".agents/orchestra/instructions/cartographer.md": [
+      "2fb8b42d5f4d8c0d9997fc1d4dcffebfe05051eb4f8cd231054c2c26696fcd85",
+      "69a1b444cf408b0094e6a28ca6e738364548727fa9dc018d1581b29e71d06c53"
+    ],
+    ".agents/orchestra/instructions/common.md": [
+      "11e28960d3a5fc39ecbcae8d0769aeae4886f8b97742def316893388d0b0aa88",
+      "cdaede71c0190bdd9e8d8b6cffeb748ad901bdba1aba0d068772371a0a74548a"
+    ],
+    ".agents/orchestra/instructions/examiner.md": [
+      "98f367763fc444ed769d09c051f81dafe650eb29151090bf6541a3660f9cfc29"
+    ],
+    ".agents/orchestra/instructions/guildmaster.md": [
+      "1dc4326b7adb4b91bdf608518fc2b7cd176e11d5ed73b52e5bff8c22bb31c50f"
+    ],
+    ".agents/orchestra/instructions/inquisitor.md": [
+      "4029cfbfea6bfaeeecefe3d6ffbf4c59fa9662bdc552ab3d5a8f7c1f8fb6af71"
+    ],
+    ".agents/orchestra/instructions/sage.md": [
+      "ae574a14ec53000e35502d1dbc7f8985881cb10d1b927b4724c215ab33719da8"
+    ],
+    ".agents/orchestra/instructions/session_recovery.md": [
+      "c8a78fa7ce9a9559feff6a5caa32e4b24e9d86617f3199300120805ee5d3a795"
+    ],
+    ".agents/orchestra/instructions/warden.md": [
+      "461b3fd254489767a7d10c723e69e09723c084d9131ab357c16609f61fdacbb0"
+    ],
+    ".agents/orchestra/logs/daily/README.md": [
+      "4041c0892b8a6378fcc8e0520c59ec1e9acced9a620c86c43bd22d7347e44e57"
+    ],
+    ".agents/orchestra/queue/README.md": [
+      "3eccd421270b4d242c0c30970aaf2397cbcf701f62fba161727c5eec94acf284"
+    ],
+    ".agents/orchestra/queue/templates/adventurer_assignment.yaml": [
+      "4b831a9ff9ea460311c985933eb149c6d61b28ddb4e4bde8f32097dddd7477bc"
+    ],
+    ".agents/orchestra/queue/templates/adventurer_inbox.yaml": [
+      "d7269bae133059b896699e0528ad71fd65da2be0e49e03d21feb38184adbcb8e"
+    ],
+    ".agents/orchestra/queue/templates/adventurer_report.yaml": [
+      "d7da89b08f6932b165e8bb2aa9284ae163ef2ec25b6d5c7e8b360c22a131a1c4"
+    ],
+    ".agents/orchestra/queue/templates/cartographer_assignment.yaml": [
+      "18013f872cb73ef8f70c56305dbab4b6c23c3372827614b254ee462c4086cedb"
+    ],
+    ".agents/orchestra/queue/templates/cartographer_report.yaml": [
+      "5c8ba9e1ed00151f198f221c067489a8877a0bbc9917751aa0578129bed2dd72"
+    ],
+    ".agents/orchestra/queue/templates/command.yaml": [
+      "73e524b91e58ef95b9b07ffddaea96a82f125af156a18094f8895421f86a1bd9"
+    ],
+    ".agents/orchestra/queue/templates/examiner_assignment.yaml": [
+      "d1edb598e899e47c53a4c0f3c9e7c119a60dc614e50b80f676b9bb41e0ebf4e0"
+    ],
+    ".agents/orchestra/queue/templates/examiner_report.yaml": [
+      "072c041c6bd9c0b3e377af7ca06658b61e16f5282df20961b450059dc8cf5a97"
+    ],
+    ".agents/orchestra/queue/templates/inquisitor_report.yaml": [
+      "1d1148d81c0cdf59024eabfdf1b286e6aebf347c355f8d1ddcdf0c34ed365297"
+    ],
+    ".agents/orchestra/queue/templates/inquisitor_trial.yaml": [
+      "19ef4df20d1a4a19dc1e10b7cf8946dfc2b1a65fe712adc8dd577bcd80780a0e"
+    ],
+    ".agents/orchestra/queue/templates/request.yaml": [
+      "ab08d8cc5c571a7603473112708790479c9c5af749215f57e278bc527c10e206"
+    ],
+    ".agents/orchestra/queue/templates/role_inbox.yaml": [
+      "2f2d6d92fa801e983f4e36d169c7d490d9026f91d713b3d371e4b8e6504b5fa1"
+    ],
+    ".agents/orchestra/queue/templates/sage_assignment.yaml": [
+      "c81bcf6f55d20e14312216483338b0598d2a4cde57a14d0aafca9c33d230abcd"
+    ],
+    ".agents/orchestra/queue/templates/sage_report.yaml": [
+      "28d49bb497e34531a867f9b5c1ef132023a2c6e7421bfd96127e5a16b6a479d7"
+    ],
+    ".agents/orchestra/queue/templates/warden_assignment.yaml": [
+      "e91e0fe7aecbe271830993c563bd99c573d9b2d3ae5097756851b7014c3ab365"
+    ],
+    ".agents/orchestra/scripts/claude_compat.py": [
+      "927dd7c5e2cc96f79016024d6436cd7f9a7af103e6885b15f25973b0596660fc"
+    ],
+    ".agents/orchestra/scripts/docker_python.sh": [
+      "a556c822fd266021c2090d4ed93df5e4e8465c212ba9c7e94afada910ca6b235"
+    ],
+    ".agents/orchestra/scripts/inbox_write.sh": [
+      "bf07c4a9cc811a262587380080f6f73fc897956bff0773a7877d2a15975e42e5"
+    ],
+    ".agents/orchestra/scripts/queue_audit.py": [
+      "1fd190de64791c7925a710d92bcc07458bda3a4fc2531820cf6cdf3e29591011"
+    ],
+    ".agents/orchestra/scripts/queue_db.py": [
+      "850d72015f99ca099b4e8ea86958bfe201a51c29d067b6b35eead523b14e32a0"
+    ],
+    ".agents/orchestra/scripts/queue_schema.sql": [
+      "a883418f960b28bc84381ed00fe4a9b55eb870e50a41fa26122ace122acb7c7c"
+    ],
+    ".agents/orchestra/scripts/snapshot_digest.py": [
+      "60a481111c67ad719bb9c34682de27ce357221966a07432cd88c5348ef709467"
+    ],
+    ".agents/orchestra/skill-candidates/README.md": [
+      "284d936250a356437c0b3cc952856b91741fdaedbc0af2a6c205201de1f0b220"
+    ],
+    ".agents/skills/branch-implementation-final-review/SKILL.md": [
+      "b0deb8426235e7f384055df80d09c83964a5c503f6a253dda8d79789014e7e50",
+      "b74793499a91bdde5bf24706555d1798f5842027043a6337c3362e0da2fdfa3b"
+    ],
+    ".agents/skills/branch-implementation-final-review/agents/openai.yaml": [
+      "806c9380465edc00148b44428035ed27c8a6ee1e1934218ed63f8b9f24e8ab82"
+    ],
+    ".agents/skills/browser-research-readonly/SKILL.md": [
+      "57b165b128e4d2a1e0d07957f6751b73f517d587a37dc5ee930ca52b66a79f48",
+      "a2acbc2f5c4cb3bbf1895202752cafc0057fdc3d5ba033219b5f026d5907aad7"
+    ],
+    ".agents/skills/browser-research-readonly/agents/openai.yaml": [
+      "e17f6c88e44e24bc8099dff2b983297360da2d286a212cac56126bee13af8ea5"
+    ],
+    ".agents/skills/communicate-work-estimates/SKILL.md": [
+      "7ab5c9ef7b23d47406f15f7e8e5d97e56514a82eb9372c197e1e98bc8649c4ce"
+    ],
+    ".agents/skills/communicate-work-estimates/agents/openai.yaml": [
+      "f4bb8a2f8cb68209aa26f9b3bee339cfab771c1d7e9e7e63aab89402ff8996ac"
+    ],
+    ".agents/skills/create-skill-candidate-from-gap/SKILL.md": [
+      "6f29dbb47ecd0e0969ade455e2e41c7915ce0c4f2cddf277c929c3007f3fe376"
+    ],
+    ".agents/skills/create-skill-candidate-from-gap/agents/openai.yaml": [
+      "526bd48d8db7ea116b22e66305be212b18a47cd3244a577590e755caf159d777"
+    ],
+    ".agents/skills/create-skill-candidate-from-gap/scripts/validate_skill_candidate.py": [
+      "1cd7c867375a8766ef9441c87d91ca255e476e27d9c116d984cebd222a331fbb"
+    ],
+    ".agents/skills/explain-clearly/SKILL.md": [
+      "a5a4b67218124fe29acca6f0960d4b041ec5e6ef574e74e47cad8ed9857675c4"
+    ],
+    ".agents/skills/explain-clearly/agents/openai.yaml": [
+      "9561f2263c029ec892259e4a10fe3d58926ad645167aa7c7bd0a8a2ce0ae1bb2"
+    ],
+    ".agents/skills/git-branch-from-session/SKILL.md": [
+      "25098ba07d5a4f2de598d7da8790ac6264f97d4472bd98321f70a2f5449a1f88",
+      "bcf5a2ef1c01973eae6b14d7f408b504fafcfe8f7c4392eda0db5deb54f48f5f"
+    ],
+    ".agents/skills/git-branch-from-session/agents/openai.yaml": [
+      "270156f9cdf5090c2cb85d777ab9253c784dcfa355565daf37f6e4ba8ee2ad54"
+    ],
+    ".agents/skills/git-rename-unpushed-branch-from-diff/SKILL.md": [
+      "26c6bccbe001e3edde9ae36b9913a8b48d7321ae073a446b9f943358c6441622",
+      "b0b486ec80fef1b27e9dfd1197b1f5c06f0f755d08b66204d58c2f8657554d0d"
+    ],
+    ".agents/skills/git-rename-unpushed-branch-from-diff/agents/openai.yaml": [
+      "7c2b781a99df5be82f3a08edbcf277cea411fd97895eec22f1c741ce713b131a"
+    ],
+    ".agents/skills/git-split-commits-from-diff/SKILL.md": [
+      "8a61632b5bf348c9f6b6d43c66f3b59aae89fe855fddfda5058dc254414cac4a",
+      "bab6482e11bc3c5908d8a725599e6f9f2515c309f0baed851d8ae270fc555b8f"
+    ],
+    ".agents/skills/git-split-commits-from-diff/agents/openai.yaml": [
+      "4bbcdb2d95169a40cc978f63e74a6c976334e5ba3f7e7092537853614edf767b"
+    ],
+    ".agents/skills/github-pull-request-from-branch/SKILL.md": [
+      "0265c9a678b113ca49d2ca603f06fb69ef537eb1273f0c58db2400218ee8f025",
+      "7b9e89b8d387078911c334b32fa782c0be53465359598099e64be8184bb89cdb"
+    ],
+    ".agents/skills/github-pull-request-from-branch/agents/openai.yaml": [
+      "3358ebfc57f6058e77381737b2389ead95a4ffcfa7c59d6b812a0a7945ded564"
+    ],
+    ".agents/skills/github-safe-push-from-branch/SKILL.md": [
+      "a3ab95b3cb3db77f2cfd31306cfed300f210debb268b160ec3d0e89ac7c9370b",
+      "bc52a7e0fa989babe0c091c1b7c469d2d4382cd223922385882dc1c4e5e06df0"
+    ],
+    ".agents/skills/github-safe-push-from-branch/agents/openai.yaml": [
+      "8470521d9854599b8ec1367bd8573641ea207ad7521e90371df6d83d5ee5bdd4"
+    ],
+    ".agents/skills/implementation-behavior-verification/SKILL.md": [
+      "98f72bbc19e5891b89efbee4a4658496e921298b561813e39d3a6a167a2c3955",
+      "e93e1c43fac6fccf56e63fc82a8b8f862e44e8b53c147776f67e3b1b60105631"
+    ],
+    ".agents/skills/implementation-behavior-verification/agents/openai.yaml": [
+      "b8f04af5d27f520f2e17b9b5f3baaf10cf80239d5bbf36d8f7c5f14c21e44221"
+    ],
+    ".agents/skills/open-subrepo-in-vscode/SKILL.md": [
+      "1d9444a088e8c213945c422a0a21d4d825f0bae7d5dbb7facf419cd073673208",
+      "f93973f07505a23208cddf55074643efbd48c5c53ee524757e05836dd6654744"
+    ],
+    ".agents/skills/open-subrepo-in-vscode/agents/openai.yaml": [
+      "1de673a8687d7f6f0db99d5486bec73d9941c844c7cfdebf6335b1a01322d61c"
+    ],
+    ".agents/skills/open-subrepo-in-vscode/scripts/open_repositories_in_vscode.py": [
+      "cfc127ad8968c46d47713d81ae3b2be054633fd16e14304091a1ba156c2c2299"
+    ],
+    ".agents/skills/orchestra-instruction-contract-review/SKILL.md": [
+      "55b8a748314a79ed83f4f976a8e61340101caee4a52f52df42690cae595ef2da",
+      "58a69182d5be82070e466cce9bbe72f3d471f2bd22bde4774d8657b2e27ede40"
+    ],
+    ".agents/skills/orchestra-instruction-contract-review/agents/openai.yaml": [
+      "0e4617f34672462a40ebaa498042ab80a3f463cb7e03d4f9486672591dc94b24"
+    ],
+    ".agents/skills/orchestra-runtime-security-audit/SKILL.md": [
+      "a3bcc96e74194ed139e0021d5c9597f672c98d8228c3d6c49f2148b8e00f4113",
+      "c84f9528438ddf1583234905efd9820855ca992ec6bc31c37051321960d5e11e"
+    ],
+    ".agents/skills/orchestra-runtime-security-audit/agents/openai.yaml": [
+      "d6d7209acb8e2db4fcd746642a2c770ca4da8a3f2c5c00d96cbe7a144b415c41"
+    ],
+    ".agents/skills/orchestra-validation-review/SKILL.md": [
+      "0c3e62a3799ca88cd0c484dd255ccb6a0855a4fdb4490ac2bbf1af4ff19261fd",
+      "72f557a7a006cbbd24a2c67c90c44d3f1273e23035ecd63b9b8fa39124830a86"
+    ],
+    ".agents/skills/orchestra-validation-review/agents/openai.yaml": [
+      "cd371fecdbd23bff753e3569321108b0afd88bcb0baf842b00cd2f59b30ec47b"
+    ],
+    ".agents/skills/pull-request-description-from-branch/SKILL.md": [
+      "1f117aa939b5c85a94066e294da5865d022ea8535cb80922e0f785f2abbbcf75",
+      "536d1b679c0f960c915b6dff433699051ab2538a1afce130587113b68f3a2cca"
+    ],
+    ".agents/skills/pull-request-description-from-branch/agents/openai.yaml": [
+      "551760a36fd595e366890077cde559ecd0e35a5ca32105ca5929a37d1f3230c2"
+    ],
+    ".agents/skills/quest-awareness-loop/SKILL.md": [
+      "5c6e95ac128184a4285a513f0bc56dfd0a47f50dca9150c21ad10ac1ebf2c338",
+      "a7a8360fefff4533b80de4b04164287fc658df54689baf5e5f21a047a3e137c2"
+    ],
+    ".agents/skills/quest-awareness-loop/agents/openai.yaml": [
+      "0d405280711010276e8065f06ae6a5fbd961b6ae133c61f749f7c1e60a01c67a"
+    ],
+    ".agents/skills/refine-design-plan/SKILL.md": [
+      "ce46bade7cf66f7defcc162d786ed56afee723b5272c89e8464914581d53d803"
+    ],
+    ".agents/skills/refine-design-plan/agents/openai.yaml": [
+      "7e3a01428d015c0caf9783c2edb8871e0d4151947fed4bffbd0b8667d438d196"
+    ],
+    ".agents/skills/repository-design-mapmaking/SKILL.md": [
+      "326198b017e9eddaaf0a487f8e1d887c8c64651b4bcb9c74f6d480096b424b4e",
+      "a48d90f69ea0824623ce45c5cf8bd089c6d713c541ec706caae8f347366f0d6e"
+    ],
+    ".agents/skills/repository-design-mapmaking/agents/openai.yaml": [
+      "938cdfd66e4b17e81c65683af7a40920ece1e63003fde6ecb4870fc6139dba4e"
+    ],
+    ".agents/skills/use-guild-workflow/SKILL.md": [
+      "a073383d68ed21d60a2f2278cce470e0360bc0996837b3dc0a4ffece27596a62",
+      "c297ecf66de6c849b053425bfd626f4497be074d0b16a4bc7068fb23b7e67109"
+    ],
+    ".agents/skills/use-guild-workflow/agents/openai.yaml": [
+      "803d0479f5fc80b9e2c584d376f1967844291634d42620b5136b020148232431"
+    ],
+    ".codex/agents/adventurer.toml": [
+      "51f1fe48a13ad083fddfadc1e37f65f5d47b3e81e56e7598014abd44bedbb871",
+      "8746efb0118e4a99df87ba18617c2c5feb5fa322832010570b8ba6f2e60e5808",
+      "d3b8cf64a6fd7a3691efcf587b452193fd39731ae536a780e5379b56d11655fe",
+      "fc09290ee1767c11c3f85ef7a68f10db09ddbf7d22d73e88ab1b9f08c860d037"
+    ],
+    ".codex/agents/artificer.toml": [
+      "71b4e53c7e75202c2e5e0d04329847e1bdd5e8d77479fce91c71bc6e99b4a77d",
+      "780a37a62a0d30860bc8a7a68813c2b00fb5a81112d8c7f8f450f766a80b7a68"
+    ],
+    ".codex/agents/captain.toml": [
+      "d3a75bcbe5109f184b29a18bae39c4008c2e97df967be4cc474ee34bc998d9de",
+      "e4ceccebd2c416857c279b1d253898d31032b3c3e1383d3c6300e69ba9d10b5c"
+    ],
+    ".codex/agents/cartographer.toml": [
+      "377863809c8e883cbf85b9c2d635e393126fb81aae0e2e68703c978c79350e13",
+      "dd77aa8bd7cc95133d6b6146c248c70ea103bdd3a15241ba79294981bf4ec43b"
+    ],
+    ".codex/agents/courier.toml": [
+      "2d4dc52384de89098a8d68369b1124e248a243381e2e5eb528ee1aa95892f77a",
+      "365cc117ecbbaa6e04f79ca36e6296fd23393f72e5d4d05c9f777bb61a769fee",
+      "4dcb645bacef4921da798336def072e1a113a31ebf0ce1ef9a2a5428c8369d2f",
+      "a44269d499524ac967c8d059a6ed2db270a1eedcd6c9a1ae7984c019fe5c444e",
+      "d859213becca25064d78904d7ba9cc11b7933fafb3561bacaa1fabb50dbe931e"
+    ],
+    ".codex/agents/examiner.toml": [
+      "6fa372f482e0a7c29320bc1031d520a227b35420c36c84117dcd76b067d59fdd",
+      "aa4a2372efdf923e74f4f499089e6e5f8c1d30ac57100ecb20aa5f24790aa489",
+      "f335d889e1b5b9273cbcc50640a742ea0bb22ae91e246aa98eeac1ff6da6a96b"
+    ],
+    ".codex/agents/guildmaster.toml": [
+      "037de1bdd139b3bf1fa645f3ba3ef2c1a3e85fe5931f0eb2d3559024593482b8",
+      "db2fb5eb66a3c8d8f71484ee635db63e37c6b782e7dcd49470a9553fb83d424a"
+    ],
+    ".codex/agents/inquisitor.toml": [
+      "8b4f7deddd37d040e7adfd88e2432c90e01cd911418b07deba8ce25f05fde6f7",
+      "c3c818121ef04766c2b846725c700741041aa864620c4099ba957874e6408f2c"
+    ],
+    ".codex/agents/sage.toml": [
+      "7991448512299bcaac9271dff53de2b6cdaa148fe9836de1a121407f4b035c31",
+      "97ade00bfeb8b63ea20eceb59bc772432c35655214b5d25ab7fbf5f7b1ea6945",
+      "e138a9369913ba591cec5d627b543e50a49ea950c37583f8748b9c3c197c3a63"
+    ],
+    ".codex/agents/warden.toml": [
+      "1a0aceb0a4d55c182438644d8a22ad2d0c7188f639fd4162121902b254e397a1",
+      "7f84295d80e56b343d67e8706815e90f0418750cda4d24c5d62e821064696b3c"
+    ],
+    ".codex/config.toml": [
+      "4c97bb3cc9a007609d25ffe5c2cf33a0762ef6ea24f25b8bcd5156a9bd108637",
+      "e5b3868079582c792ca32c95303e9a0d490ff9e8b70b531a41d959d02fdab993"
+    ],
+    ".codex/hooks.json": [
+      "7ce429f2aa087ccf9d5276c2e2d5172aae26c9341df44ff45867534e6d2345e6"
+    ],
+    ".codex/hooks/stop_quality_gate.py": [
+      "868aec5df0ded894d96c8590854373eb16675d9f6bdd834d853293e02a02ec87"
+    ],
+    ".codex/hooks/stop_quality_gate.sh": [
+      "fa15089668a254310e62ec00faea0453cbb8a5a71748167ac418de9ab70dc701"
+    ],
+    "AGENTS.md": [
+      "81fa859d713caada518072dc4b43e20b89f0ce4d9ce2cfc2c11a89b0a3de7715",
+      "b2d1634b35bb27f5781637dd6641220eb4290940a053e3a2525784b399fc9054"
+    ]
+  },
+  "hook_commands": [
+    "f372dab91c1ae2f901aa1f52769085b2208b20fb6fd9078d65d78447e2d01800"
+  ]
+}

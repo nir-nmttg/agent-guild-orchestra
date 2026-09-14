@@ -1,6 +1,0 @@
-.git
-.orchestra
-.agent-guild-orchestra-backups
-.DS_Store
-__pycache__/
-*.pyc

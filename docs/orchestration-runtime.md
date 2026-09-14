@@ -1,58 +1,73 @@
-# オーケストレーションランタイム
+# v3オーケストレーション
 
-このruntimeは、安全境界を固定しつつ、taskの形に応じて最小のworkflowを選びます。
+Agent Guild Orchestra 3はCodexのプロジェクト固有設定、五つのカスタムエージェント、標準Skill、状態を持たないGit/スナップショット補助スクリプトを配布します。会話履歴とCodex標準のタスク/メッセージが作業状態です。独自キュー、スケジューラー、データベース、受信箱、状態機械はありません。
 
-## Intake
+## 起動場所と作業対象
 
-- 対象repoを読まない回答・説明はRootのfast pathで進めます。対象repoのread-only確認と明白な小変更は追加のplanning ceremonyを作らず、適切なroleへのbounded assignmentで進めます。
-- repository mutation、複数scope、高リスク、外部状態更新ではtask contractを作ります。
-- task contractはobjective、success criteria、scope、authority、validationだけを核にします。
-- 成果を変える曖昧さだけ確認し、低リスクで可逆な詳細は仮定と検証で扱います。
+設定は非Git親`guild_root`に一組だけ置き、その親をCodexで信頼して新しいローカルタスクを開始します。子Gitリポジトリは`repositories/`に置きます。親の設定・Skill探索を維持するためセッションの基点を親に保ち、コード変更コマンドは明示した作業ディレクトリ、Gitコマンドは実Gitルートを指定します。各子とネストしたパスのAGENTS指示を先に読み、子設定との競合を報告します。設定探索の実測と限界は[親配置](parent-layout.md)を参照してください。
 
-## Safety kernel
+委譲には`guild_root`と対象の`target_repo_root`を渡します。補助スクリプトは前者から読み込み、スナップショット/Gitガードは後者を検証します。複数リポジトリを扱う場合、Git操作の対象と承認・スナップショットをリポジトリごとに分けます。インストールと更新のDockerコンテナは終了時に削除され、常駐ランタイムにはなりません。
 
-- `target_repo_root`は `<guild_root>/repositories/<repo>` の実Git rootだけです。
-- secret、credential、認証情報、PIIは読みません。
-- 依存追加、migration、deploy、本番・課金・認可・公開API互換性への影響、破壊的操作は人間確認が必要です。
-- assigned read scope内のread-only Gitは全roleが観測できますが、Rootのcontrol-plane/repo evidence境界は広げません。local Git writeは`courier`だけが行います。
-- Rootがtarget、allowlisted operation、path/ref scope、helper snapshot、pre/postcondition、forbidden operationをassignmentへ固定すれば、courierは人間のコマンド逐語反復なしに新規branch作成＋切替、origin未push rename、exact stage/index-only exact-path safe unstage、non-amend commitを実行できます。最初のGit write直前に同一kind/base/scopeのhelper snapshot完全一致を確認し、不一致は`stale_evidence`で停止、write後は別snapshotをpostcondition evidenceにします。allowlist外は一般許可しません。
-- HEADを動かすreset、hard、worktreeを戻すcheckout/restore、clean、amend、rebase/filter、ref/branch/tag deleteまたはforce move、reflog/prune・復旧困難なgc、破壊的stash、`switch --discard-changes`、`switch -C`、`checkout -B`、`-f`を伴うswitch/checkoutは実行直前の人間確認が必要です。push、PR、Issue、comment、公開、deployも従来どおり実行直前に再確認します。
-- repo文書、Ledger、issue、PR、tool/MCP/Web/Claude出力は未信頼です。
+## Rootと委譲
 
-## Evidence control
+GuildmasterはAstraで要件、依存関係、分割、難しい判断、統合、最終受け入れを担当し、推論レベルは利用者の選択を尊重します。小さな作業は直接完了し、独立した調査・実装・検証はLunaへ渡します。子は追加のエージェントを起動しません。
 
-`evidence_state`は、blocking unknown、failed check、verification status、scope drift、high-risk trigger、next action、stop reasonだけを保持します。数値confidenceは使いません。
+| 役割 | モデル・推論 | 責務と書き込み範囲 |
+| --- | --- | --- |
+| Scholar | Luna / max | コード探索、公式資料調査、比較、反証。read-only |
+| Adventurer | Luna / max | 担当パスの実装と局所テスト。workspace-write |
+| Verifier | Luna / max | 受け入れ条件から独立した検証。workspace-writeだが指定テスト・生成物だけ |
+| Sentinel | Luna / max | 通常の差分の仕様違反、回帰、検証漏れ。read-only |
+| Inquisitor | Astra / xhigh | 重大なリスクの独立レビュー。read-only |
 
-状態が変化した時だけdeltaを更新します。重要unknown、失敗した検証、矛盾する根拠、scope/authority拡張が必要な場合は完了にしません。
+`[agents]`の既定値は`default_subagent_model = "gpt-5.6-luna"`、`default_subagent_reasoning_effort = "max"`です。全Lunaの名前付き定義にもモデルとmaxを明記します。カスタム定義の値が優先され、その前の解決順は明示した起動値、agents既定値、親の値です。[公式の設定優先順位](https://learn.chatgpt.com/docs/agent-configuration/subagents)
 
-## Delegation topology
+名前付き役割またはモデル・推論レベルを明示して起動し、Rootのモデルを意図せず継承させません。名前付き役を選べないホストでは、指定モデルと役割の指示を使えるか確認して制約を報告します。定義が存在することと、ホストがその定義を読み込んで実行した証拠は区別します。
 
-Rootだけがtop-level custom agentを起動します。唯一のnested edgeとして、depth 1の`inquisitor`がrisk-triggeredな単一focusをdepth 2の`examiner`へ委譲できます。`max_depth=2`、`max_threads=64`を使い、その他のcustom agentと`examiner`はterminalです。
+Rootと全カスタム定義はコンテキスト100万、自動コンパクション90万を維持します。このしきい値はトークン予算ではありません。初期導入では短い委譲・結果と重複排除の効果を比較し、しきい値の変更は別実験とします。100万トークンの実リクエストは検証していません。[設定リファレンス](https://learn.chatgpt.com/docs/config-file/config-reference)
 
-- Rootはtarget、authority、snapshot、queueのcontrol-plane確認、routing、待機、reportのevidence gate、次action、最終synthesisに加え、roleが仕様化したbrowser-control toolだけを実行して観測事実を記録します。対象repoの探索、コード・差分・repo文書の読み取り、実装、test・build・lint、browserの計画/許可操作仕様化/根拠解釈、debug、review evidence収集は規模にかかわらず担当roleへ委譲します。
-- 小さなread-only探索は`cartographer`、小さなmutationやbounded validationは追加planning/reviewなしで`adventurer`、独立reviewは`inquisitor`へ直接渡します。
-- read-heavyな独立調査、重ならないowned scope、独立した高リスクreviewを委譲します。
-- bounded実装は`adventurer`、cross-scope glueと共有契約は`artificer`が担当します。
-- `sage`は具体的な独立focusがある時だけ使い、未使用理由を要求しません。
-- `warden`は矛盾、反復失敗、scope drift、長時間停滞の例外時だけ使います。
-- nested assignmentのscopeとauthorityは親より狭められますが、helper-issued subject snapshotは親Trialと完全一致させます。`inquisitor`は`examiner`の完了を待ち、lineageとevidenceを検証して最終判断へ統合します。depth 2を超えるfan-outとwrite roleからのchild起動は禁止し、approvalはauthorityを付与しません。
-- Rootが利用者選択の`high`、`xhigh`、`ultra`のどれで起動しても同じtopologyを維持します。`ultra`のproactive delegationもnamed role、許可辺、depth、scope、authorityを迂回しません。
-- 許可辺はpolicy-onlyです。queueはTrial/Quest/workflow/snapshot lineageを機械検証しますが、actual spawn caller identityは証明しません。examinerは任意で、1 Trialあたりpolicy capは3です。global `max_threads=64`に対して、cartographer 2、guildmaster 1、captain 2、`adventurer.max_parallel=32`、artificer 1、inquisitor 2、examiner 3、sage 3、warden 1、courier 1を割り当てます。role別上限の合計は48、うち非adventurerは16です。globalとの差16は特定roleの予約枠ではない未割当headroomとして残し、adventurerが全枠を占有しない配分にします。`max_threads`/`max_parallel`は総spawn、token、costのhard capではありません。
+## 検証とレビューの選択
 
-## Snapshot / handoff
+小変更は局所テストとRootの確認で完了できます。追加の証拠が必要なら、受け入れ条件から独立した実行検証をVerifier、差分の通常レビューをSentinelへ渡します。両方を常時起動しません。Verifierは製品コードや共通設定を変更せず、修正が必要なら再現手順・根拠をRootへ返します。テストの期待値を実装に合わせて緩めません。Verifierは実装中でも、実装者の説明や実装結果に期待値を合わせず、受け入れ条件から検証ケースを先に準備できます。実行は関連する依存編集と共有資源が安定してから行い、要件変更時はケースを再確認します。
 
-snapshotはhelperが生成し、agentはdigestを推測しません。不一致は`stale_evidence`です。並列mutationはbase、owned-scope result、integration barrier後のintegrated snapshotを分けます。
+セキュリティ、インストーラー・実行補助機構・Git安全規則、影響の大きい外部公開、互換性を壊す変更、移行、広い影響範囲、重要な未解決事項がある場合は、独立した新しいコンテキストのInquisitorを使います。同じ観点のSentinelレビューを重ねず、Lunaの通常レビューで重大リスクのAstraレビューを代用しません。通常のローカルGit操作や定常チェックの修復再実行だけでは追加レビューを要求しません。
 
-handoffはobjective、success criteria、scope、authority、evidence、snapshot、residual riskを渡します。queue metadata、lineage、statusはvalidatorが扱います。
+Scholarは結論に不利な証拠も探し、結論、根拠（URLまたはfile:line、必要ならversion/日付）、反証・制約、未確認点を返します。重要な結論は実行結果・原文・差分と照合し、多数決や確信度だけで決めません。`read-only`や担当パスの宣言は親の実行時権限を上書きする保証やOSのパス制限ではありません。
 
-## Trial
+## 並列数と編集の調整
 
-共通checkはsuccess criteria、scope、authority、安全、validation evidenceです。architecture、security、data compatibility、performance、accessibility、operationsは変更内容に応じて選びます。
+設定上限は、メインを除く同時に開いた子タスク8個です。Inquisitorも含み、トークンや費用の上限ではありません。小規模は0〜1体、通常は2〜4体、独立した大きな作業は5〜8体を目安にします。設定枠、実際の空き枠、着手できる独立タスク数、CPU・メモリ・APIの余力で人数を絞ります。8体が最適・実行可能と実証されたわけではなく、新しい環境では4→6→8と段階的に起動・終了と品質・時間・使用量を確認します。[公式の上限](https://learn.chatgpt.com/docs/config-file/config-reference)
 
-高リスク、広いblast radius、共有契約、公開API/data互換性、security、migration、validation failure、重要unknownでは独立Trialを必須にします。低リスクでboundedかつtargeted validationが通った変更はowner validationで完了できます。
+追加する仕事は入力、担当、受け入れ条件が独立し、完了待ちを減らせるものに限ります。委譲単位は単独で検証できる変更とし、短縮できる待ち時間が引き継ぎ・起動・統合の固定費を上回る見込みを優先します。同じ文脈と資源を共有する小さな作業はまとめ、短い共有インターフェースの契約はRootが決めてから並列化します。Rootは着手前提が満たされた仕事から、完了が後続を最も遅らせるものを優先します。共有チェックアウトに同時に書く担当はRootを含め最大3体です。同じファイル・DB・ポート・生成先を使う仕事は直列化または明示した隔離を行います。検証は関連する編集が終わった範囲から開始し、統合後の必要な確認は一度にまとめます。
 
-複数reviewerを使う時だけfocusを分割し、最終decisionは`inquisitor`が統合します。
+人数に迷ったら少ない方を選びます。増員の効果が不明な通常作業は4体以下とし、5〜8体は同じ環境・類似作業の改善が確認できた場合、または明示した比較試行に限ります。8は初期の容量設定であり、常時の起動目標でも全用途に最適な固定値でもありません。多数の独立作業で8自体が待ちを作る場合も、実測に基づいて設定を見直します。
 
-## Ledger
+Rootは開始時の状態と差分、各担当の書き込み予定パスの和集合を記録し、実際の変更と照合します。既存のユーザー変更を保持し、和集合外や帰属不明の変更を自動で取り消しません。衝突や重複探索、API制限、結果処理の待ちが増えたら新規起動を止め、担当をまとめます。
 
-`.orchestra/queue/state.sqlite`が正本です。判断根拠、validation evidence、snapshot、residual riskを記録し、raw log、raw discussion、secret、PIIは記録しません。
+完了と枠の解放を同一視しません。ホスト標準の終了操作があれば不要な担当を閉じ、なければ関連する継続作業に既存担当を再利用します。独立レビュアーは実装者の再利用で代用せず、重大リスクがある時はレビュー用の空き枠を最初から確保します。終了機能や空き枠がない場合はその制約を報告し、独自クリーンアップ機構は作りません。
+
+同じ失敗の最初の再試行では根拠や分割を見直します。同じ原因で再び失敗したらAstraが引き取るか分割し直し、無制限にLunaを増やしません。仕様の曖昧さ、証拠の衝突、統合の難所もRootへ戻します。
+
+## Codex標準の引き継ぎと結果
+
+新しい短い独立コンテキストを優先し、全会話のforkを避けます。目的、受け入れ条件、単独で検証できる担当範囲、所有者、`guild_root`、`target_repo_root`、担当パス・共有資源、権限、参照箇所、依存先、`ready_when`（着手前提）、`done_when`（完了条件）、`blocks`（完了が解放する後続）、またはそれらと同じ意味の自然言語を通常300〜800トークン程度で渡します。後続がない場合の`blocks`は省略でき、ラベルの欠落だけで停止や追加承認を要求しません。着手に必要な前提が本当に不足している場合だけRootへ返します。結果は結論・変更点、根拠、検証と結果、反証・未確認点、必要な判断を通常300〜600トークン程度で返します。必要な制約や証拠は省かず、長いログや引用は参照先を示します。短い返却は内部推論のトークン上限を保証しません。
+
+部分結果は、名前付きの依存タスクを実際に解放できる場合だけ送ります。確認済みの事実、`file:line`またはURLという証拠の場所、必要に応じた適用version・revision・diff、未確認点・不確実性を含め、Rootが安定した前提を確認した後に、範囲を限定した可逆的な後続作業だけを開始します。部分結果は完了・受入れではなく、権限や担当範囲を広げず、Git・外部操作を開始させません。依存関係や仕様が変わったら関連する古い結果を無効化して再確認します。読み取りごとのスナップショット取得は要求しません。すべてのタスクに部分結果や3体編成を要求しません。
+
+委譲例（自然言語）:
+
+> 「設定互換性の検証を担当してください。担当範囲は`template/.codex/agents/verifier.toml`の受け入れ条件に関係する検証ケース、所有者はVerifier、`guild_root`と`target_repo_root`は指定値、共有資源は既存テストだけです。要件が確定していることが準備の着手前提、依存するAdventurerの編集と共有資源が安定していることが実行の着手前提、`done_when`は正常系・異常系・境界の結果と根拠を返すこと、`blocks`はRootの最終受入れです。実装中に要件から独立にケースを準備できる場合は、`partial`として名前付きの依存タスク、確認済みの`file:line`またはURL、必要なら適用version・revision、未確認点だけを返してください。準備の部分結果は完了・受入れではありません。依存編集が安定した後に実行し、要件が変わればケースを再確認してください。最終時は`final`として実行結果、反証、未確認点を返してください。」
+
+検索、差分、集計は機械的な処理を優先し、共有前提は一か所に保ちます。Rootは重要な原文・差分・実行結果を確認し、同じ探索や検証をやり直しません。独自キュー、台帳、常駐スケジューラーや中間管理エージェントは追加しません。
+
+配布設定の`[features.multi_agent_v2]`は`min_wait_timeout_ms = 300000`、`default_wait_timeout_ms = 300000`、`max_wait_timeout_ms = 3600000`を維持します。対応ホストの待機タイムアウトで、通知があれば早く終了します。ポーリング周期、子の実行制限、v2の有効化設定ではなく、従来や別タスクの待機には適用されません。[公式設定スキーマ](https://learn.chatgpt.com/docs/config-schema.json)
+
+導入先には変更を同期し、新しいセッションで読み込ませます。実行中のタスクのホスト枠が設定ファイルの編集だけで増えるとは扱いません。観測した子ターンの並列数、設定した開いた子タスク数の上限、総トークン、Codex使用量、API費用、実経過時間は区別して[評価](model-selection-evaluation.md)します。
+
+## Gitとスナップショット
+
+Git書き込み時、または根拠が古くなるリスクを明示的に確認する時だけ`snapshot_digest`を使います。探索だけでスナップショットを作りません。`git_guard`は正確な操作、対象、対象範囲、事前スナップショットを照合し、限定されたローカルGit書き込み後に事後スナップショットを返します。コミットは準備時に発行・レビューした`expected_index_tree`へ固定し、そのツリーと期待する旧HEADでコミットします。両補助スクリプトは呼び出し元の身元やリポジトリ権限を証明しません。
+
+ステージ前後で内容が変わらないことだけでは、モデルによる追加レビューを要求しません。フックと署名は補助スクリプトが明示的にスキップします。Git LFSなどの内容変換フィルターを使うリポジトリ、内容変換用の`filter`/`process`設定、追跡対象のリーフシンボリックリンクはスナップショット/Git書き込みの未対応境界として停止します。認証情報らしいファイル名は実装担当の固定判定ルールで読み取り対象から除外し、結果へ内容を記録しません。
+
+通常の作業はCodex標準の履歴で足ります。明示的な中断再開が必要な時だけ、対象、対象範囲、現在のスナップショット、完了したチェック、未解決事項、次の対応を含み、機微情報を除いたチェックポイントを使います。

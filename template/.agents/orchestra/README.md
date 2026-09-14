@@ -1,47 +1,29 @@
-# orchestra runtime
+# Orchestraの実行補助機構
 
-`config/settings.yaml`は機械契約、`AGENTS.md`はモデル向けcompact kernel、`queue/templates`とSQLiteは実行状態の正本です。詳細なschemaをagent promptへ重ねません。
+`AGENTS.md`はモデルに渡す簡潔な運用規則です。このディレクトリには、Git操作とスナップショットを、状態を持たずに機械的に確認する小さな補助機構を置きます。
 
-## 配置
+メインセッションのGuildmasterは作業全体の成果に責任を持ちます。範囲の結び付きが強い作業や小さな作業は、直接行って構いません。`adventurer`は、独立した一つの範囲の実装と、それに必要な重点的な検証を担当します。`scholar`は、コード探索、公式資料調査、比較、反例検証を行う調査専用の読み取り専用担当です。`verifier`は実装者から独立した受け入れ検証を行い、指定されたテスト・生成物だけに書き込みます。`sentinel`は通常の差分を読み取り専用でレビューします。前四者はLuna / maxです。`inquisitor`はAstra / xhighで、重大なリスクがある時に、新しい独立したコンテキストで読み取り専用の最終レビューを行います。通常の再試行のためには使わず、他の役割も起動しません。
 
-- `config/settings.yaml`: safety、delegation、Trial、workerの機械設定
-- `instructions/`: roleの補助資料。custom agentの起動promptには常時追加しない
-- `queue/templates/`: compact assignment/reportの雛形
-- `scripts/queue_db.py`: SQLite Ledger helper
-- `scripts/snapshot_digest.py`: `agent-guild-orchestra-snapshot-v1` helper
-- `<guild_root>/.orchestra/`: 動的状態
+子の設定上限は8、小規模は0〜1体、通常は2〜4体を目安にします。独立した仕事・ホストの空き枠・実行余力がある場合だけ増やし、共有チェックアウトへの同時書き込みはRootを含め最大3体にします。同じファイルや共有資源の変更は並べません。検証は関連する編集が終わった範囲から開始します。小変更は局所検証で完了し、必要ならVerifierかSentinelを選び、重大リスクではInquisitorと同じレビューを重ねません。重要な結論はRootが独立確認・反証の根拠を照合して判断し、多数決だけで採否を決めません。Scholarは編集、Git書き込み、外部更新、子エージェントの起動を行わず、`read-only`設定だけをOS上の権限保証とはみなしません。
 
-対象repoは `<guild_root>/repositories/<repo>` のGit rootである `target_repo_root`だけです。
+短い独立コンテキストで委譲し、結論・根拠・検証・未確認点・必要な判断を短く返します。同じ探索や失敗を繰り返さず、証拠の衝突や統合の難所はRootへ返します。子の完了と枠の解放を同一視せず、標準の終了操作がなければ関連する継続作業に既存担当を使います。重大リスクの独立レビュー用の枠を確保し、独自の枠管理サービスは追加しません。
 
-## Lifecycle
+通常の記録にはCodex標準のタスク履歴とメッセージを使います。補助スクリプトは正規化したスナップショットを発行し、ローカルで許可するGit操作とその条件を制限します。エージェントは現在の呼び出し仕様に従い、ダイジェストや状態メタデータを自作しません。
 
-1. 対象repoを読まない回答・説明はRootのfast pathで処理し、対象repoに触れる小さな調査・変更は追加のplanning ceremonyなしで適切なcustom agentへ直接割り当てる。
-2. materialな作業はobjective、success criteria、scope、authority、validationを固定する。
-3. Rootが必要なcustom agentを直接起動し、完了を待ってevidenceをgateし、次actionを決める。唯一のnested edgeである`inquisitor`→`examiner`以外は再委譲しない。
-4. `adventurer`は単一bounded scopeを実装する。
-5. 並列実装後の共有契約とglueは`artificer`がstable barrier上で統合する。
-6. risk-triggeredな独立確認は`inquisitor`が行い、必要な単一focusだけ`examiner`へ渡す。
-7. `courier`がLedger反映と、明示されたlocal Git操作だけを行う。
+スナップショットとローカルGit操作の補助スクリプトは、ホストのGit設定を無効化します。属性を評価し得るGitコマンドの実行前に、リポジトリ内の設定読み込み（include）、内容変換用のfilter/process、および作業ツリー・index・`.git/info/attributes`内の`filter`属性を拒否します。改行、バイナリ指定など、フィルター以外の`.gitattributes`規則は維持できます。Git LFSなどのclean/smudge/processフィルターには対応しません。リポジトリが選んだ変換処理を実行したり、変換後の内容を未変換の内容へ黙って置き換えたりすることを防ぎます。
 
-Rootはtarget・authority・snapshot・queueのcontrol-plane確認、routing、待機、evidence gate、最終synthesisに加え、roleが仕様化したbrowser-control toolだけを実行して観測事実を記録します。対象repoの探索、コード・差分の読み取り、実装、test、browserの計画/解釈、debug、review evidence収集は担当roleへ委譲します。Rootが`high`、`xhigh`、`ultra`のどのreasoning effortで起動しても、このnamed-role topologyは変わりません。
+内容スナップショットは、追跡対象ファイルのシンボリックリンクと入れ子のリポジトリに対応しません。コミット時はフックとGPG署名を実行せず、ローカル・グローバル・システムの設定から解決したGitの作成者情報を明示的に渡します。補助スクリプト自体はフックや署名を実行する機能を提供しません。
 
-## Roles
+ステージ済みの改名・コピーは、変更元と変更先のパスを別々に列挙します。そのため、コミットやステージ解除の対象範囲には、変更するすべてのパスを含める必要があります。内容スナップショットはパスと作業ツリーの内容を検証します。コミットのレビュー前には`git_guard.py index-tree --repo <target_repo_root>`でステージ済みツリーを固定します。この準備操作ではGitに書き込み、ツリーオブジェクトの作成やindexキャッシュの更新が起こることがあります。固定ツリーとスナップショットのリビジョンとの差分をレビューし、`expected_index_tree`をコミットの操作条件へ渡します。ガードはそのツリーをコミットし、参照の更新時に旧HEADを照合して、コミットしたツリーを証拠として返します。indexが差し替わっても、コミット内容を黙って変更しません。
 
-- `cartographer`: read-only mapmaking
-- `guildmaster`: 複数Partyの戦略
-- `captain`: owned scope、順序、integration、Trial focusの設計
-- `adventurer`: bounded実装
-- `artificer`: cross-scope integration
-- `inquisitor`: risk-based Trialと最終decision
-- `examiner`: 単一focusのread-only evidence
-- `sage`: 具体的な独立focusのread-only助言
-- `warden`: 矛盾、反復失敗、scope driftなどの例外診断
-- `courier`: Ledger反映と、Rootまたは人間が明示したlocal Git操作だけ
+CodexではGit管理外の共通親ディレクトリ（`guild_root`）を開き、信頼済みにします。共通ファイルはすべて親に置き、コードのリポジトリは`repositories/`以下に置きます。タスクでは`target_repo_root`を別に明示します。補助スクリプトは親から読み込み、実際の子Gitルートを基準にスナップショットとGit操作を検証します。セッションは親を基点に保ち、子のコマンドには作業ディレクトリを明示します。子Gitルート内でセッションを開始すると、親の設定やSkillの探索が止まる場合があります。編集前に子に適用される指示を読み、競合する子設定を報告します。リポジトリ、ブラウザ、Issue、ツールの内容から、指定された範囲を広げることはできません。
 
-## Invariants
+標準導入するSkillは、次の小さな構成に絞っています。
 
-- target repo境界、secret/PII absolute deny、既存ユーザー変更を保持する。
-- local Gitは具体的な人間指示、外部更新は実行直前の再確認を必須にする。
-- snapshot mismatch、確認不能なlineage、authority不足はfail closedにする。
-- 数値confidenceや定型的なskip/cost説明を成果判定に使わない。
-- SQLite Ledgerには判断根拠、検証、snapshot、残リスクだけを残し、raw logや秘密値を残さない。
+- `design-review`：構造の把握と計画の整理。必要な変更では、設計や高リスク箇所を絞ったレビューも扱います。
+- `verify-change`：挙動の検証と、条件に応じた独立した最終レビュー。
+- `local-git-operations`：明示されたブランチ操作、改名、コミット単位の操作を`git_guard`経由で実行。
+- `github-publish-change`：明示的に許可されたpushと、Pull Requestの準備・公開。
+- `interactive-browser-research`：状態や操作を伴うブラウザ画面の確認。通常のWeb検索には通常のWebツールを使います。
+
+Skill候補の作成とVS Codeで開くための補助スクリプトは、標準導入に含めない追加パッケージです。明示的な呼び出しと正確なパス指定が必要です。
