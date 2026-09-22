@@ -36,14 +36,14 @@ bash "$SCRIPT_DIR/sync.sh" --target "$parent" > "$fixture/sync.json"
 diff -r "$fixture/before" "$parent/repositories"
 [[ ! -e "$child/.codex" && ! -e "$linked/AGENTS.md" ]]
 
-# Reconstruct a prior child v3 manifest only inside this disposable fixture.
+# Reconstruct a historical 3.0.0 child manifest, independent of the current VERSION.
 cp "$parent/AGENTS.md" "$linked/AGENTS.md"
 cp -R "$parent/.codex" "$linked/.codex"
 cp -R "$parent/.agents" "$linked/.agents"
 image_id="$(docker build --quiet "$SCRIPT_DIR/../docker")"
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$fixture,target=/fixture" "$image_id" \
-  python3 -c 'import json; from pathlib import Path; p=Path("/fixture/asked root/repositories/linked worktree/.agents/orchestra/install-manifest.json"); value=json.loads(p.read_text()); value["schema"]=1; value.pop("layout"); p.write_text(json.dumps(value))'
+  python3 -c 'import json; from pathlib import Path; p=Path("/fixture/asked root/repositories/linked worktree/.agents/orchestra/install-manifest.json"); value=json.loads(p.read_text()); value["schema"]=1; value["distribution_version"]="3.0.0"; value.pop("layout"); p.write_text(json.dumps(value))'
 cp -R "$parent/repositories" "$fixture/with-child-v3"
 bash "$SCRIPT_DIR/sync.sh" --target "$parent" > "$fixture/sync-with-child.json"
 bash "$SCRIPT_DIR/cleanup-child.sh" --target "$parent" --child "$linked" --dry-run > "$fixture/cleanup-dry.json"
