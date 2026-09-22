@@ -646,13 +646,14 @@ def _safe_relative(value: str, *, label: str) -> str:
     if not isinstance(value, str) or "\0" in value or "\n" in value or "\r" in value or "\\" in value:
         raise SnapshotError(f"{label} は単一の repo-relative path にしてください。")
     path = PurePosixPath(value)
+    # 角括弧は通常の名前として許可する。Gitへは --literal-pathspecs で渡す。
     if (
         path.is_absolute()
         or not path.parts
         or any(part in {"", ".", "..", ".git"} for part in path.parts)
         or value.startswith("~")
         or re.match(r"^[A-Za-z]:[\\/]", value)
-        or any(char in value for char in "*?[]{}")
+        or any(char in value for char in "*?{}")
         or value.startswith(":")
     ):
         raise SnapshotError(f"{label} が安全な repo-relative path ではありません: {value}")
