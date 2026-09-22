@@ -168,6 +168,98 @@ class GitGuardTests(unittest.TestCase):
             self.assertEqual(git(repo, "ls-files", "--others", "--exclude-standard").splitlines(), [unrelated])
             self.assertEqual((repo / unrelated).read_text(encoding="utf-8"), "unrelated\n")
 
+    def test_bracketed_routes_stage_unstage_and_commit_literal_files(self) -> None:
+        routes = (
+            ("app/blog/[slug]/page.tsx", "app/blog/s/page.tsx"),
+            ("app/docs/[...slug]/page.tsx", "app/docs/g/page.tsx"),
+            ("app/docs/[[...slug]]/page.tsx", "app/docs/s]/page.tsx"),
+            ("pages/[slug].tsx", "pages/s.tsx"),
+        )
+        for owned, decoy in routes:
+            with self.subTest(path=owned), tempfile.TemporaryDirectory() as raw:
+                repo = self.make_repo(Path(raw))
+                for relative in (owned, decoy):
+                    (repo / relative).parent.mkdir(parents=True, exist_ok=True)
+                (repo / decoy).write_text("outside scope\n", encoding="utf-8")
+                for content, untracked in (("created\n", [owned]), ("updated\n", [])):
+                    (repo / owned).write_text(content, encoding="utf-8")
+                    snapshot = snapshot_digest.compute_snapshot(
+                        repo, kind="working_tree_content", scope_paths=[owned], untracked_paths=untracked,
+                    )
+                    injected = {"GIT_GLOB_PATHSPECS": "1", "GIT_NOGLOB_PATHSPECS": "1", "GIT_ICASE_PATHSPECS": "1"}
+                    with mock.patch.dict(os.environ, injected):
+                        staged = git_guard.apply(self.contract(repo, "stage_exact_paths_or_hunks", snapshot, paths=[owned]))
+                        self.assertEqual(staged["evidence"]["staged_paths"], [owned])
+                        self.assertEqual(staged["postwrite_snapshot"]["untracked_paths"], [])
+                        unstaged = git_guard.apply(self.contract(
+                            repo, "unstage_index_only_exact_paths", staged["postwrite_snapshot"], paths=[owned],
+                        ))
+                        self.assertEqual(unstaged["evidence"]["staged_paths_after"], [])
+                        self.assertEqual(unstaged["postwrite_snapshot"]["untracked_paths"], untracked)
+                        self.assertEqual((repo / owned).read_text(encoding="utf-8"), content)
+                        restaged = git_guard.apply(self.contract(
+                            repo, "stage_exact_paths_or_hunks", unstaged["postwrite_snapshot"], paths=[owned],
+                        ))
+                        committed = git_guard.apply(self.contract(
+                            repo, "commit_non_amend", restaged["postwrite_snapshot"], paths=[owned], message="update route",
+                        ))
+                    self.assertEqual(committed["evidence"]["committed_paths"], [owned])
+                    self.assertEqual(git(repo, "diff", "--name-only", "HEAD^", "HEAD").splitlines(), [owned])
+                    self.assertEqual(git(repo, "show", f"HEAD:{owned}"), content)
+                    self.assertEqual(git(repo, "ls-files", "--others", "--exclude-standard").splitlines(), [decoy])
+                    self.assertEqual((repo / decoy).read_text(encoding="utf-8"), "outside scope\n")
+
+    def test_bracketed_scope_preserves_unrelated_staged_blob_and_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            owned, decoy = "app/blog/[slug]/page.tsx", "app/blog/s/page.tsx"
+            for relative in (owned, decoy):
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("baseline\n", encoding="utf-8")
+            git(repo, "--literal-pathspecs", "add", "--", owned, decoy)
+            git(repo, "commit", "--quiet", "-m", "route baseline")
+            (repo / owned).write_text("owned change\n", encoding="utf-8")
+            (repo / decoy).write_text("staged decoy\n", encoding="utf-8")
+            git(repo, "add", "--chmod=+x", "--", decoy)
+            (repo / decoy).write_text("unstaged decoy\n", encoding="utf-8")
+            before_index = git(repo, "ls-files", "-s", "-z", "--", decoy)
+            before_head = git(repo, "rev-parse", "HEAD")
+            snapshot = snapshot_digest.compute_snapshot(repo, kind="working_tree_content", scope_paths=[owned])
+            staged = git_guard.apply(self.contract(repo, "stage_exact_paths_or_hunks", snapshot, paths=[owned]))
+            self.assertEqual(git(repo, "ls-files", "-s", "-z", "--", decoy), before_index)
+            all_staged = git(repo, "ls-files", "-s", "-z")
+            with self.assertRaises(git_guard.GitGuardError) as caught:
+                git_guard.apply(self.contract(repo, "commit_non_amend", staged["postwrite_snapshot"], paths=[owned], message="must reject"))
+            self.assertEqual(caught.exception.code, "scope_expansion")
+            self.assertEqual(git(repo, "rev-parse", "HEAD"), before_head)
+            self.assertEqual(git(repo, "ls-files", "-s", "-z"), all_staged)
+            git_guard.apply(self.contract(repo, "unstage_index_only_exact_paths", staged["postwrite_snapshot"], paths=[owned]))
+            self.assertEqual(git(repo, "diff", "--cached", "--name-only").splitlines(), [decoy])
+            self.assertEqual(git(repo, "ls-files", "-s", "-z", "--", decoy), before_index)
+            self.assertEqual((repo / decoy).read_text(encoding="utf-8"), "unstaged decoy\n")
+
+    def test_bracketed_route_partial_stage_commits_only_the_reviewed_hunk(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            owned = "app/blog/[slug]/page.tsx"
+            path = repo / owned
+            path.parent.mkdir(parents=True)
+            path.write_text("one\ntwo\nthree\nfour\n", encoding="utf-8")
+            git(repo, "--literal-pathspecs", "add", "--", owned)
+            git(repo, "commit", "--quiet", "-m", "route baseline")
+            path.write_text("one changed\ntwo\nthree\nfour changed\n", encoding="utf-8")
+            snapshot = snapshot_digest.compute_snapshot(repo, kind="working_tree_content", scope_paths=[owned])
+            patch = f"diff --git a/{owned} b/{owned}\n--- a/{owned}\n+++ b/{owned}\n@@ -1,2 +1,2 @@\n-one\n+one changed\n two\n"
+            staged = git_guard.apply(self.contract(repo, "stage_exact_paths_or_hunks", snapshot, paths=[owned], patch=patch))
+            tree = git_guard.index_tree(repo)
+            committed = git_guard.apply(self.contract(
+                repo, "commit_non_amend", staged["postwrite_snapshot"], paths=[owned], expected_index_tree=tree, message="partial route",
+            ))
+            self.assertEqual(committed["evidence"]["commit_tree"], tree)
+            self.assertEqual(git(repo, "show", f"HEAD:{owned}"), "one changed\ntwo\nthree\nfour\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), "one changed\ntwo\nthree\nfour changed\n")
+
     def test_partial_stage_commit_uses_reviewed_index_tree(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             repo = self.make_repo(Path(raw))
