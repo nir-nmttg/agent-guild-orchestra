@@ -96,6 +96,8 @@ class ParentInstallTests(unittest.TestCase):
             destination = put(repo, name, (self.parent / name).read_bytes())
             shutil.copystat(self.parent / name, destination)
         manifest["schema"] = 1
+        # Child cleanup recognizes the historical release, not the current VERSION.
+        manifest["distribution_version"] = "3.0.0"
         manifest.pop("layout")
         put(repo, str(install.MANIFEST_REL), json.dumps(manifest))
         return manifest

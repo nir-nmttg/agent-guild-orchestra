@@ -36,7 +36,7 @@ def directories(path: Path) -> set[str]:
 
 
 def validate_version() -> None:
-    require((ROOT / "VERSION").read_text(encoding="utf-8").strip() == "3.0.0", "VERSION must be 3.0.0")
+    require((ROOT / "VERSION").read_text(encoding="utf-8").strip() == "3.1.0", "VERSION must be 3.1.0")
 
 
 def validate_required_paths() -> None:

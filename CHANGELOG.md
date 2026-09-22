@@ -4,11 +4,22 @@
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-23
+
+### 変更
+
 - Git補助スクリプトが`[slug]`など角括弧を含む通常のパスを拒否していた問題を修正。スナップショット・ステージ・ステージ解除・コミットで文字どおりのパスを扱い、対象外ファイルや既存の安全制約を維持する回帰試験を追加
 - 委譲の目安を600〜1,500トークン、子からRootへの最終返却を通常800〜2,000・必要な判断材料が収まらない場合は2,000〜4,000へ緩和し、各役から適用される共有指示の共通目安を参照。判断に必要な情報の保持、成功結果の集約と例外の明示、超過可能・水増し不要・進捗には適用しない方針を明記
 - Scholar・Adventurer・Verifierと既定subagentをGPT-6 Luna/max、SentinelをGPT-6 Sol/xhighへ移行。Rootの推論レベル選択、Inquisitor、コンテキスト、並列数、権限境界は維持
 - Verifierの確認済み/未検証条件、Sentinelの発生条件・影響・根拠、Rootの修正割り当て・最終受け入れを明確化。必要な証拠による担当選択と修正影響範囲の再確認をAGENTS・役割・Skillへ反映
 - 旧モデルの評価記録を保持し、混在モデルの固定割当を`condition_id`で検証・分離集計。旧5役からの移行試験、独自設定向け案内、名前付き起動probeの期待値を更新
+
+## [3.0.0] - 2026-09-14
+
+公開済みの変更を旧Unreleasedから整理しました。公開時点の最終仕様と移行手順は[v3.0.0のリリースノート](https://github.com/nir-nmttg/agent-guild-orchestra/releases/tag/v3.0.0)を参照してください。
+
+### 公開版に含まれる追加変更
+
 - 着手条件・終了条件・後続への影響に基づく委譲と、Rootが確認した部分結果による後続の着手を追加。Verifierは実装中に要件から検証を準備し、安定した依存先で実行する
 - 同じ子上限3で現行の役割分割と改善運用を比べる`flow3`評価プロファイルを追加。全試行を含むタスク時間の分布、初回合格率、出典付きの待ち・引き継ぎ・手戻り時間、独立評価による重大な見落としを後方互換で集計する
 - AGENTS.md、ロール指示、Skill本文・参照手順・説明、評価用プロンプト、運用文書を日本語化。Skillの表示名、モデル設定、操作識別子、権限境界は維持
@@ -27,9 +38,9 @@
 - `install.sh`、`sync.sh`、`make validate`をDocker内のPython 3.12とGitで実行し、ホストPythonのversion依存を解消
 - Docker launcherの引数・mount検証と、実Dockerによる導入・更新・旧Guild root移行・linked worktreeのsmoke testを追加
 
-## [3.0.0] - 2026-09-05
+### 初期設計の記録
 
-### Breaking changes
+以下は開発途中の構成を含む記録です。公開版で確定した役割・配置・移行方法は、上記リリースノートと追加変更を参照してください。
 
 - productをCodex向けの静的template distributionへ再設計し、独自scheduler、SQLite queue、inbox、Ledger、dashboard、rank、Stop hook、二重settingsを削除
 - Rootをgpt-6-astra / highへ変更し、利用者のsession overrideを尊重。Rootの直接作業を許可し、custom agentをLuna/maxのAdventurerとAstra/high read-only Inquisitorだけに縮小
