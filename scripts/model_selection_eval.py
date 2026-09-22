@@ -25,6 +25,48 @@ DEFAULT_MANIFEST = ROOT / "scripts/model_selection_eval.yaml"
 STRATEGIES = {"astra_only", "astra_luna"}
 SPLITS = {"pilot", "holdout"}
 ROLES = {"root", "worker", "review"}
+MIXED_CONDITION_ID = "mixed-luna-v1"
+MIXED_ROOT_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"]
+MIXED_CONDITION = {
+    "strategy": "astra_luna",
+    "named_roles": {
+        "guildmaster": {
+            "role": "root",
+            "model": "gpt-6-astra",
+            "reasoning_efforts": MIXED_ROOT_EFFORTS,
+        },
+        "root": {
+            "role": "root",
+            "model": "gpt-6-astra",
+            "reasoning_efforts": MIXED_ROOT_EFFORTS,
+        },
+        "adventurer": {
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "reasoning_efforts": ["max"],
+        },
+        "scholar": {
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "reasoning_efforts": ["max"],
+        },
+        "verifier": {
+            "role": "worker",
+            "model": "gpt-6-luna",
+            "reasoning_efforts": ["max"],
+        },
+        "sentinel": {
+            "role": "worker",
+            "model": "gpt-6-sol",
+            "reasoning_efforts": ["xhigh"],
+        },
+        "inquisitor": {
+            "role": "review",
+            "model": "gpt-6-astra",
+            "reasoning_efforts": ["xhigh"],
+        },
+    },
+}
 PROFILE_CAPS = {
     "solo": {"strategy": "astra_only", "max_open_threads": 1},
     "current3": {"strategy": "astra_luna", "max_open_threads": 3},
@@ -83,7 +125,7 @@ SOURCE_POLICIES = {
         "cost": {"account_reported", "api_estimate", "unknown"},
     },
 }
-OPTIONAL_RECORD_FIELDS = {"profile", "run_id", "major_miss_count"}
+OPTIONAL_RECORD_FIELDS = {"condition_id", "profile", "run_id", "major_miss_count"}
 OPTIONAL_ATTEMPT_FIELDS = {
     "max_open_threads",
     "max_open_threads_source",
@@ -338,6 +380,13 @@ def validate_manifest(value: dict[str, Any]) -> None:
             if definition["strategy"] != PROFILE_CAPS[profile]["strategy"]:
                 raise EvalError(f"profile {profile} strategy must remain {PROFILE_CAPS[profile]['strategy']}")
 
+    conditions = value.get("conditions")
+    if conditions is not None:
+        if not isinstance(conditions, dict) or set(conditions) != {MIXED_CONDITION_ID}:
+            raise EvalError(f"conditions may declare only {MIXED_CONDITION_ID}")
+        if conditions[MIXED_CONDITION_ID] != MIXED_CONDITION:
+            raise EvalError(f"condition {MIXED_CONDITION_ID} role/model/effort mapping is fixed")
+
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise EvalError("tasks must be a non-empty list")
@@ -492,6 +541,7 @@ def validate_event(
     event_index: int,
     invocation_ids: set[str],
     manifest: dict[str, Any],
+    condition_id: str | None,
     profile: str | None,
     timing_events: list[tuple[str, float, float]],
 ) -> str:
@@ -512,7 +562,7 @@ def validate_event(
         raise EvalError(f"{task_id} attempt {attempt_index} event {event_index} role/status is invalid")
     model = nonempty_string(event["model"], f"{task_id} event model")
     effort = nonempty_string(event["reasoning_effort"], f"{task_id} event reasoning_effort")
-    expected = expected_model(manifest, strategy, role)
+    expected = expected_model(manifest, strategy, role) if condition_id is None else None
     root_override = role == "root" and provenance["root_override"] is True
     if strategy == "astra_only" and role == "worker":
         raise EvalError(f"{task_id} astra_only may not record a worker event")
@@ -523,18 +573,38 @@ def validate_event(
         elif model != expected["model"] or effort != expected["reasoning_effort"]:
             raise EvalError(f"{task_id} {strategy} {role} model/effort mismatch")
     named_role = event.get("named_role")
-    if profile is not None and named_role is None:
-        raise EvalError(f"{task_id} explicit profile {profile} requires named_role on every event")
-    validate_named_role(
-        named_role,
-        role,
-        model,
-        effort,
-        root_override=root_override,
-        label=f"{task_id} attempt {attempt_index} event {event_index}.named_role",
-    )
-    if profile is not None and named_role not in PROFILE_NAMED_ROLES[profile]:
-        raise EvalError(f"{task_id} named_role {named_role} is not allowed by profile {profile}")
+    if condition_id is not None:
+        label = f"{task_id} attempt {attempt_index} event {event_index}.named_role"
+        if named_role is None:
+            raise EvalError(f"{task_id} condition {condition_id} requires named_role on every event")
+        named_role = nonempty_string(named_role, label)
+        condition = manifest["conditions"][condition_id]
+        expected_named = condition["named_roles"].get(named_role)
+        if expected_named is None:
+            raise EvalError(f"{label} is not allowed by condition {condition_id}")
+        if expected_named["role"] != role:
+            raise EvalError(f"{label} accounting role must be {expected_named['role']}, got {role}")
+        if model != expected_named["model"]:
+            raise EvalError(f"{label} model must remain {expected_named['model']}")
+        if effort not in expected_named["reasoning_efforts"]:
+            raise EvalError(
+                f"{label} reasoning_effort must be one of {expected_named['reasoning_efforts']}"
+            )
+        if role == "root" and effort != "high" and provenance["root_override"] is not True:
+            raise EvalError(f"{label} requires provenance.root_override for a non-default Root effort")
+    else:
+        if profile is not None and named_role is None:
+            raise EvalError(f"{task_id} explicit profile {profile} requires named_role on every event")
+        validate_named_role(
+            named_role,
+            role,
+            model,
+            effort,
+            root_override=root_override,
+            label=f"{task_id} attempt {attempt_index} event {event_index}.named_role",
+        )
+        if profile is not None and named_role not in PROFILE_NAMED_ROLES[profile]:
+            raise EvalError(f"{task_id} named_role {named_role} is not allowed by profile {profile}")
     failure = event["failure_evidence"]
     if event["status"] == "failed":
         nonempty_string(failure, f"{task_id} failed event {event_index}.failure_evidence")
@@ -578,6 +648,16 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
     assert isinstance(provenance, dict)
     if "run_id" in record:
         nonempty_string(record["run_id"], f"{task_id} run_id")
+    condition_id = record.get("condition_id")
+    if "condition_id" in record:
+        nonempty_string(condition_id, f"{task_id} condition_id")
+        conditions = manifest.get("conditions")
+        if not isinstance(conditions, dict) or condition_id not in conditions:
+            raise EvalError(f"{task_id} condition_id is undeclared: {condition_id}")
+        if conditions[condition_id].get("strategy") != strategy:
+            raise EvalError(f"{task_id} condition {condition_id} is incompatible with {strategy}")
+        if "profile" in record:
+            raise EvalError(f"{task_id} may not combine condition_id and profile")
     profile = record_profile(record)
     if "profile" in record:
         nonempty_string(record["profile"], f"{task_id} profile")
@@ -677,6 +757,7 @@ def validate_record(record: dict[str, Any], manifest: dict[str, Any], invocation
                 event_index=event_index,
                 invocation_ids=all_invocation_ids,
                 manifest=manifest,
+                condition_id=condition_id,
                 profile=profile,
                 timing_events=timing_events,
             )
@@ -918,13 +999,14 @@ def _max_open_threads(rows: list[dict[str, Any]]) -> tuple[int | None, str]:
 
 
 def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    grouped: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         root_model, root_effort = record_root_pair(row, row["task_id"])
+        condition_id = row.get("condition_id") or ""
         profile = record_profile(row) or "unknown"
-        grouped[(row["evidence_kind"], row["split"], row["strategy"], profile, root_model, root_effort)].append(row)
+        grouped[(row["evidence_kind"], row["split"], row["strategy"], condition_id, profile, root_model, root_effort)].append(row)
     output: dict[str, Any] = {"groups": []}
-    for (kind, split, strategy, profile, root_model, root_effort), values in sorted(grouped.items()):
+    for (kind, split, strategy, condition_id, profile, root_model, root_effort), values in sorted(grouped.items()):
         total_tokens, token_basis = _sum_measurements(values, "tokens", "usage_source", {"observed", "synthetic"})
         total_codex_usage, codex_basis = _sum_measurements(values, "codex_usage", "usage_source", {"observed"})
         total_account_cost, account_cost_basis = _sum_measurements(values, "api_cost_usd", "api_cost_source", {"account_reported"})
@@ -997,6 +1079,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "evidence_kind": kind,
                 "split": split,
                 "strategy": strategy,
+                "condition_id": condition_id or None,
                 "profile": profile,
                 "run_ids": sorted({record_run_id(row) for row in values}),
                 "run_count": len({record_run_id(row) for row in values}),
@@ -1051,7 +1134,7 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
     legacy_groups = {
         (row["evidence_kind"], row["split"])
         for row in rows
-        if record_profile(row) is None
+        if record_profile(row) is None and row.get("condition_id") is None
     }
     for kind, split in legacy_groups:
         task_ids = {task["id"] for task in manifest["tasks"] if task["split"] == split}
@@ -1060,6 +1143,7 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
             (row["evidence_kind"], row["split"], row["task_id"], row["strategy"])
             for row in rows
             if record_profile(row) is None
+            and row.get("condition_id") is None
             and row["evidence_kind"] == kind
             and row["split"] == split
         }
@@ -1078,7 +1162,7 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
     profile_groups = {
         (row["evidence_kind"], row["split"], record_profile(row))
         for row in rows
-        if record_profile(row) is not None
+        if record_profile(row) is not None and row.get("condition_id") is None
     }
     definitions = profile_definitions(manifest)
     for kind, split, profile in profile_groups:
@@ -1091,6 +1175,7 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
             (row["evidence_kind"], row["split"], profile, row["task_id"], row["strategy"])
             for row in rows
             if record_profile(row) == profile
+            and row.get("condition_id") is None
             and row["evidence_kind"] == kind
             and row["split"] == split
         }
@@ -1101,6 +1186,52 @@ def validate_coverage(rows: list[dict[str, Any]], manifest: dict[str, Any]) -> N
                 f"{kind}/{split}/{profile} result matrix is incomplete: "
                 f"missing={sorted((item[3], item[4]) for item in missing)}, "
                 f"extra={sorted((item[3], item[4]) for item in extra)}"
+            )
+
+    # A condition_id names one separately declared mixed-role experiment. It
+    # has independent per-split and Root model/effort coverage, and can never
+    # fill legacy/profile rows or another Root configuration's coverage.
+    condition_groups = {
+        (
+            row["evidence_kind"],
+            row["split"],
+            row["condition_id"],
+            *record_root_pair(row, row["task_id"]),
+        )
+        for row in rows
+        if row.get("condition_id") is not None
+    }
+    conditions = manifest.get("conditions", {})
+    for kind, split, condition_id, root_model, root_effort in condition_groups:
+        definition = conditions[condition_id]
+        strategy = definition["strategy"]
+        task_ids = {task["id"] for task in manifest["tasks"] if task["split"] == split}
+        expected = {
+            (kind, split, condition_id, root_model, root_effort, task_id, strategy)
+            for task_id in task_ids
+        }
+        actual = {
+            (
+                row["evidence_kind"],
+                row["split"],
+                condition_id,
+                *record_root_pair(row, row["task_id"]),
+                row["task_id"],
+                row["strategy"],
+            )
+            for row in rows
+            if row.get("condition_id") == condition_id
+            and row["evidence_kind"] == kind
+            and row["split"] == split
+            and record_root_pair(row, row["task_id"]) == (root_model, root_effort)
+        }
+        missing = expected - actual
+        extra = actual - expected
+        if missing or extra:
+            raise EvalError(
+                f"{kind}/{split}/{condition_id} result matrix is incomplete for Root {root_model}/{root_effort}: "
+                f"missing={sorted((item[5], item[6]) for item in missing)}, "
+                f"extra={sorted((item[5], item[6]) for item in extra)}"
             )
 
 
@@ -1126,14 +1257,15 @@ def main(argv: list[str] | None = None) -> int:
         rows = list(records(result_path))
         if not rows:
             raise EvalError("results are empty")
-        keys: set[tuple[str, str, str, str, str, str]] = set()
+        keys: set[tuple[str, str, str, str, str, str, str]] = set()
         provenance_run_ids: set[str] = set()
         invocation_ids: set[str] = set()
         for row in rows:
             validate_record(row, manifest, invocation_ids)
+            condition_id = row.get("condition_id") or ""
             profile = record_profile(row) or "unknown"
             run_id = record_run_id(row)
-            key = (row["evidence_kind"], row["split"], row["task_id"], row["strategy"], profile, run_id)
+            key = (row["evidence_kind"], row["split"], row["task_id"], row["strategy"], condition_id, profile, run_id)
             if key in keys:
                 raise EvalError(f"duplicate task/strategy result (profile/run): {key}")
             keys.add(key)

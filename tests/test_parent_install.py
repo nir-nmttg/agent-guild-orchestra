@@ -100,6 +100,35 @@ class ParentInstallTests(unittest.TestCase):
         put(repo, str(install.MANIFEST_REL), json.dumps(manifest))
         return manifest
 
+    def old_model_distribution(self, source):
+        """Freeze the actual pre-GPT-6 models for all five agents."""
+        shutil.copytree(ROOT / "template", source)
+        role_files = sorted((source / ".codex/agents").glob("*.toml"))
+        self.assertEqual(len(role_files), 5)
+        for path in role_files:
+            if path.stem == "inquisitor":
+                continue
+            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = [
+                'model = "gpt-5.6-luna"' if line.startswith("model = ") else
+                'model_reasoning_effort = "max"' if line.startswith("model_reasoning_effort = ") else
+                line
+                for line in lines
+            ]
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        inquisitor = tomllib.loads((source / ".codex/agents/inquisitor.toml").read_text())
+        self.assertEqual((inquisitor["model"], inquisitor["model_reasoning_effort"]), ("gpt-6-astra", "xhigh"))
+        config = source / ".codex/config.toml"
+        lines = config.read_text(encoding="utf-8").splitlines()
+        lines = [
+            'max_concurrent_threads_per_session = 8' if line.startswith("max_concurrent_threads_per_session = ") else
+            'default_subagent_model = "gpt-5.6-luna"' if line.startswith("default_subagent_model = ") else
+            line
+            for line in lines
+        ]
+        config.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return source
+
     def test_fresh_dry_update_and_packages_never_touch_children(self):
         before = tree(self.parent)
         dry = self.run_install("--dry-run", "--with-skill", "create-skill-candidate-from-gap")
@@ -126,6 +155,20 @@ class ParentInstallTests(unittest.TestCase):
         self.assertEqual(plan["config_mode"], "user-owned")
         self.assertTrue(any("AGENTS.override.md" in warning for warning in plan["warnings"]))
         self.assertTrue(any("Manually reconcile" in step for step in plan["next_steps"]))
+        guidance = next(step for step in plan["next_steps"] if "Manually reconcile" in step)
+        for setting in (
+            "model_auto_compact_token_limit = 900000",
+            'default_subagent_model = "gpt-6-luna"',
+            'default_subagent_reasoning_effort = "max"',
+        ):
+            self.assertIn(setting, guidance)
+        role_guidance = next(step for step in plan["next_steps"] if "default subagent（GPT-6 Luna/max）" in step)
+        for role_setting in (
+            "adventurer・scholar・verifier（GPT-6 Luna/max）",
+            "sentinel（GPT-6 Sol/xhigh）",
+            "inquisitor（GPT-6 Astra/xhigh）",
+        ):
+            self.assertIn(role_setting, role_guidance)
         self.run_install()
         self.assertEqual((config.read_bytes(), config.stat().st_mode), before)
         self.assertTrue((self.parent / "AGENTS.md").read_text().startswith("User instructions"))
@@ -134,11 +177,78 @@ class ParentInstallTests(unittest.TestCase):
             self.run_install("--config-mode", "managed")
         self.assert_children_unchanged()
 
-    def test_update_migrates_three_roles_and_three_slots_to_five_and_eight(self):
-        source = self.base / "previous-template"
+    def test_update_migrates_actual_previous_five_role_models(self):
+        source = self.old_model_distribution(self.base / "previous-template")
+        self.run_install("--source", str(source), "--allow-non-default-source")
+        initial_manifest = install.load_manifest(self.parent)
+        self.assertIsNotNone(initial_manifest)
+        assert initial_manifest is not None
+        initial_role_files = {
+            path for path in initial_manifest["files"]
+            if path.startswith(".codex/agents/") and path.endswith(".toml")
+        }
+        role_names = ("adventurer", "scholar", "verifier", "sentinel", "inquisitor")
+        self.assertEqual(initial_role_files, {f".codex/agents/{role}.toml" for role in role_names})
+        previous_models = {
+            "adventurer": ("gpt-5.6-luna", "max"),
+            "scholar": ("gpt-5.6-luna", "max"),
+            "verifier": ("gpt-5.6-luna", "max"),
+            "sentinel": ("gpt-5.6-luna", "max"),
+            "inquisitor": ("gpt-6-astra", "xhigh"),
+        }
+        for role, expected in previous_models.items():
+            previous = tomllib.loads((self.parent / f".codex/agents/{role}.toml").read_text())
+            self.assertEqual((previous["model"], previous["model_reasoning_effort"]), expected)
+        installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
+        self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 8)
+        self.assertEqual(installed["agents"]["default_subagent_model"], "gpt-5.6-luna")
+
+        # Unmanaged parent material is part of the migration contract and must
+        # survive the distribution update byte-for-byte.
+        override = put(self.parent, "AGENTS.override.md", "local parent override\n")
+        custom = put(self.parent, ".codex/local-settings.toml", "local_setting = true\n")
+        parent_custom_before = (override.read_bytes(), custom.read_bytes())
+        children_before = tree(self.parent / "repositories")
+        before = tree(self.parent)
+        dry = self.run_install("--dry-run")
+        self.assertEqual(tree(self.parent), before)
+        for role in ("adventurer", "scholar", "verifier", "sentinel"):
+            self.assertIn({"action": "update", "path": f".codex/agents/{role}.toml"}, dry["actions"])
+        self.assertNotIn({"action": "update", "path": ".codex/agents/inquisitor.toml"}, dry["actions"])
+        self.assertIn({"action": "update", "path": ".codex/config.toml"}, dry["actions"])
+
+        self.run_install()
+        for role in role_names:
+            installed_role = self.parent / f".codex/agents/{role}.toml"
+            self.assertEqual(installed_role.read_bytes(), (ROOT / f"template/.codex/agents/{role}.toml").read_bytes())
+        expected_models = {
+            "adventurer": ("gpt-6-luna", "max"),
+            "scholar": ("gpt-6-luna", "max"),
+            "verifier": ("gpt-6-luna", "max"),
+            "sentinel": ("gpt-6-sol", "xhigh"),
+            "inquisitor": ("gpt-6-astra", "xhigh"),
+        }
+        unchanged_inquisitor = previous_models["inquisitor"]
+        for role, expected in expected_models.items():
+            installed_role = tomllib.loads((self.parent / f".codex/agents/{role}.toml").read_text())
+            self.assertEqual((installed_role["model"], installed_role["model_reasoning_effort"]), expected)
+        self.assertEqual(expected_models["inquisitor"], unchanged_inquisitor)
+        installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
+        self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 8)
+        self.assertEqual(installed["agents"]["default_subagent_model"], "gpt-6-luna")
+        self.assertEqual(installed["agents"]["default_subagent_reasoning_effort"], "max")
+        self.assertEqual(installed["model_auto_compact_token_limit"], 900_000)
+        self.assertEqual((override.read_bytes(), custom.read_bytes()), parent_custom_before)
+        self.assertEqual(tree(self.parent / "repositories"), children_before)
+        self.assertIn(".codex/agents/verifier.toml", install.load_manifest(self.parent)["files"])
+        self.assertIn(".codex/agents/sentinel.toml", install.load_manifest(self.parent)["files"])
+        with patch.object(install, "write_atomic", side_effect=AssertionError("no-op wrote a file")):
+            self.run_install()
+        self.assert_children_unchanged()
+
+    def test_update_adds_two_roles_and_expands_three_slots_to_five_and_eight(self):
+        source = self.base / "previous-three-role-template"
         shutil.copytree(ROOT / "template", source)
-        # Freeze the migration fixture at the supported pre-proposal shape:
-        # Adventurer, Scholar and Inquisitor with a three-child cap.
         for role in ("verifier", "sentinel"):
             (source / f".codex/agents/{role}.toml").unlink()
         config = source / ".codex/config.toml"
@@ -162,8 +272,6 @@ class ParentInstallTests(unittest.TestCase):
         installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
         self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 3)
 
-        # Unmanaged parent material is part of the migration contract and must
-        # survive the distribution update byte-for-byte.
         override = put(self.parent, "AGENTS.override.md", "local parent override\n")
         custom = put(self.parent, ".codex/local-settings.toml", "local_setting = true\n")
         parent_custom_before = (override.read_bytes(), custom.read_bytes())
@@ -187,6 +295,17 @@ class ParentInstallTests(unittest.TestCase):
         self.assertIn(".codex/agents/sentinel.toml", install.load_manifest(self.parent)["files"])
         with patch.object(install, "write_atomic", side_effect=AssertionError("no-op wrote a file")):
             self.run_install()
+        self.assert_children_unchanged()
+
+    def test_old_model_migration_stops_on_local_role_collision_without_writes(self):
+        source = self.old_model_distribution(self.base / "previous-template")
+        self.run_install("--source", str(source), "--allow-non-default-source")
+        sentinel = self.parent / ".codex/agents/sentinel.toml"
+        sentinel.write_text(sentinel.read_text().replace("developer_instructions", "local_developer_instructions", 1))
+        before = tree(self.parent)
+        with self.assertRaisesRegex(install.InstallError, "locally and in distribution"):
+            self.run_install()
+        self.assertEqual(tree(self.parent), before)
         self.assert_children_unchanged()
 
     def test_update_preserves_local_edits_and_rejects_two_sided_changes(self):

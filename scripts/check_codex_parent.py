@@ -26,10 +26,10 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
-    "adventurer": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "workspace-write"},
-    "scholar": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "read-only"},
-    "verifier": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "workspace-write"},
-    "sentinel": {"model": "gpt-5.6-luna", "effort": "max", "sandbox": "read-only"},
+    "adventurer": {"model": "gpt-6-luna", "effort": "max", "sandbox": "workspace-write"},
+    "scholar": {"model": "gpt-6-luna", "effort": "max", "sandbox": "read-only"},
+    "verifier": {"model": "gpt-6-luna", "effort": "max", "sandbox": "workspace-write"},
+    "sentinel": {"model": "gpt-6-sol", "effort": "xhigh", "sandbox": "read-only"},
     "inquisitor": {"model": "gpt-6-astra", "effort": "xhigh", "sandbox": "read-only"},
 }
 ROLE_NAMES = tuple(EXPECTED)
@@ -288,7 +288,17 @@ def config_view(value: dict[str, Any]) -> dict[str, Any]:
         raise ProbeError("config/read returned no config")
     agents = config.get("agents") if isinstance(config.get("agents"), dict) else {}
     features = config.get("features") if isinstance(config.get("features"), dict) else {}
-    return {"model": config.get("model"), "contextWindow": config.get("model_context_window"), "reasoningEffort": config.get("model_reasoning_effort"), "agentsEnabled": agents.get("enabled"), "maxThreads": agents.get("max_concurrent_threads_per_session"), "multiAgent": features.get("multi_agent")}
+    return {
+        "model": config.get("model"),
+        "contextWindow": config.get("model_context_window"),
+        "autoCompactTokenLimit": config.get("model_auto_compact_token_limit"),
+        "reasoningEffort": config.get("model_reasoning_effort"),
+        "agentsEnabled": agents.get("enabled"),
+        "maxThreads": agents.get("max_concurrent_threads_per_session"),
+        "defaultSubagentModel": agents.get("default_subagent_model"),
+        "defaultSubagentReasoningEffort": agents.get("default_subagent_reasoning_effort"),
+        "multiAgent": features.get("multi_agent"),
+    }
 
 
 def project_skill_view(value: dict[str, Any], root: Path, forbidden_root: Path) -> dict[str, Any]:
@@ -364,7 +374,17 @@ def static_probe(rpc: Rpc, parent: Path, child: Path) -> tuple[dict[str, Any], s
     checks: dict[str, Any] = {}
     parent_cfg = config_view(result_of(rpc.call("config/read", {"cwd": str(parent), "includeLayers": True}), "config/read"))
     child_cfg = config_view(result_of(rpc.call("config/read", {"cwd": str(child), "includeLayers": True}), "config/read"))
-    expected_parent = {"model": "gpt-6-astra", "contextWindow": 1_000_000, "reasoningEffort": None, "agentsEnabled": True, "maxThreads": EXPECTED_MAX_THREADS, "multiAgent": True}
+    expected_parent = {
+        "model": "gpt-6-astra",
+        "contextWindow": 1_000_000,
+        "autoCompactTokenLimit": 900_000,
+        "reasoningEffort": None,
+        "agentsEnabled": True,
+        "maxThreads": EXPECTED_MAX_THREADS,
+        "defaultSubagentModel": "gpt-6-luna",
+        "defaultSubagentReasoningEffort": "max",
+        "multiAgent": True,
+    }
     checks["parent_config"] = observed(parent_cfg) if parent_cfg == expected_parent else failed("parent_config_mismatch", parent_cfg)
     checks["child_config_collision"] = observed(child_cfg) if child_cfg["model"] == "child-collision-model" and child_cfg["agentsEnabled"] is False else failed("child_config_mismatch", child_cfg)
 
