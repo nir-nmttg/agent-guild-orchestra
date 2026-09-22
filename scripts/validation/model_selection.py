@@ -57,12 +57,175 @@ def validate_model_selection_eval() -> None:
     require(luna_group["max_parallel_child_turns"] is None and luna_group["max_parallel_child_turns_basis"] == "unknown", "missing turn timings were converted to a value")
     require("no model-quality" in value["claims"] and "host-usage" in value["claims"], "synthetic fixture emitted a model claim")
 
+    mixed_fixture = ROOT / "scripts/validation/fixtures/model_eval_mixed_condition.jsonl"
+    mixed_valid = run("--validate-results", str(mixed_fixture))
+    require(mixed_valid.returncode == 0, mixed_valid.stderr)
+    mixed_summary = run("--summarize", str(mixed_fixture))
+    require(mixed_summary.returncode == 0, mixed_summary.stderr)
+    mixed_value = json.loads(mixed_summary.stdout)
+    require(len(mixed_value["groups"]) == 1, "mixed condition rows were split or merged unexpectedly")
+    mixed_group = mixed_value["groups"][0]
+    require(
+        mixed_group["condition_id"] == "mixed-luna-v1"
+        and mixed_group["assigned_tasks"] == 2
+        and mixed_group["worker_events"] == 5
+        and mixed_group["review_events"] == 1,
+        "mixed condition identity or role accounting was lost",
+    )
+    require(
+        mixed_group["named_role_events"] == {
+            "adventurer": 1,
+            "guildmaster": 2,
+            "inquisitor": 1,
+            "root": 1,
+            "scholar": 2,
+            "sentinel": 1,
+            "verifier": 1,
+        },
+        "three GPT-6 Luna roles and the GPT-6 Sol Sentinel were not counted",
+    )
+
     rows = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line]
+    mixed_rows = [json.loads(line) for line in mixed_fixture.read_text(encoding="utf-8").splitlines() if line]
     with tempfile.TemporaryDirectory(prefix="agent-guild-model-eval-") as directory:
         malformed = Path(directory) / "invalid.jsonl"
 
+        combined_rows = json.loads(json.dumps(rows + mixed_rows))
+        write_rows(malformed, combined_rows)
+        combined_valid = run("--validate-results", str(malformed))
+        require(combined_valid.returncode == 0, combined_valid.stderr)
+        combined_summary = run("--summarize", str(malformed))
+        require(combined_summary.returncode == 0, combined_summary.stderr)
+        combined_groups = json.loads(combined_summary.stdout)["groups"]
+        legacy_groups = [group for group in combined_groups if group["condition_id"] is None]
+        require(legacy_groups == value["groups"], "mixed condition records changed legacy v3 aggregation")
+        require(
+            [group["condition_id"] for group in combined_groups if group["condition_id"] is not None]
+            == ["mixed-luna-v1"],
+            "independent condition IDs were merged in summary output",
+        )
+
+        manual_high_effort_rows = json.loads(json.dumps(mixed_rows))
+        for row in manual_high_effort_rows:
+            row["evidence_kind"] = "manual_record"
+            row["provenance"]["run_id"] = "manual-" + row["provenance"]["run_id"]
+            for attempt in row["attempts"]:
+                attempt["wall_time_source"] = "manual"
+                for event in attempt["stages"]:
+                    event["invocation_id"] += "-manual"
+                    event["usage"]["usage_source"] = "manual"
+                    event["usage"]["api_cost_source"] = "unknown"
+        selected_effort_rows = json.loads(json.dumps(manual_high_effort_rows))
+        for row in selected_effort_rows:
+            row["provenance"]["root_override"] = True
+            row["provenance"]["run_id"] += "-ultra"
+            for attempt in row["attempts"]:
+                for event in attempt["stages"]:
+                    event["invocation_id"] += "-ultra"
+                    if event["role"] == "root":
+                        event["reasoning_effort"] = "ultra"
+        write_rows(malformed, manual_high_effort_rows + selected_effort_rows)
+        selected_valid = run("--validate-results", str(malformed))
+        require(selected_valid.returncode == 0, selected_valid.stderr)
+        selected_summary = run("--summarize", str(malformed))
+        require(selected_summary.returncode == 0, selected_summary.stderr)
+        selected_groups = json.loads(selected_summary.stdout)["groups"]
+        require(
+            {group["root_reasoning_effort"] for group in selected_groups} == {"high", "ultra"}
+            and all(group["condition_id"] == "mixed-luna-v1" for group in selected_groups),
+            "Root effort selection was not recorded and grouped independently",
+        )
+
+        split_effort_coverage = json.loads(json.dumps(manual_high_effort_rows))
+        ultra_boundary = next(
+            row for row in split_effort_coverage if row["task_id"] == "pilot-boundary-negative"
+        )
+        ultra_boundary["provenance"]["root_override"] = True
+        ultra_boundary["provenance"]["run_id"] += "-ultra-only"
+        for attempt in ultra_boundary["attempts"]:
+            for event in attempt["stages"]:
+                event["invocation_id"] += "-ultra-only"
+                if event["role"] == "root":
+                    event["reasoning_effort"] = "ultra"
+        write_rows(malformed, split_effort_coverage)
+        rejected = run("--validate-results", str(malformed))
+        require(
+            rejected.returncode == 2
+            and "mixed-luna-v1 result matrix is incomplete" in rejected.stderr
+            and "Root gpt-6-astra/" in rejected.stderr,
+            "different Root efforts combined partial task coverage",
+        )
+
+        missing_root_override = json.loads(json.dumps(mixed_rows))
+        missing_root_override[0]["attempts"][0]["stages"][0]["reasoning_effort"] = "xhigh"
+        write_rows(malformed, missing_root_override)
+        rejected = run("--validate-results", str(malformed))
+        require(
+            rejected.returncode == 2 and "requires provenance.root_override" in rejected.stderr,
+            "non-default Root effort without override provenance was accepted",
+        )
+
+        incomplete_condition = json.loads(json.dumps(mixed_rows[:1]))
+        write_rows(malformed, incomplete_condition)
+        rejected = run("--validate-results", str(malformed))
+        require(
+            rejected.returncode == 2 and "mixed-luna-v1 result matrix is incomplete" in rejected.stderr,
+            "condition coverage was filled by legacy or missing task rows",
+        )
+
+        undeclared_condition = json.loads(json.dumps(mixed_rows))
+        undeclared_condition[0]["condition_id"] = "unregistered-condition"
+        write_rows(malformed, undeclared_condition)
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "condition_id is undeclared" in rejected.stderr, "unknown condition_id was accepted")
+
+        for named_role, field, invalid_value, message in (
+            ("sentinel", "model", "gpt-6-luna", "model must remain gpt-6-sol"),
+            ("sentinel", "reasoning_effort", "max", "reasoning_effort"),
+            ("inquisitor", "model", "gpt-6-sol", "model must remain gpt-6-astra"),
+            ("inquisitor", "reasoning_effort", "high", "reasoning_effort"),
+            ("guildmaster", "model", "gpt-6-luna", "model must remain gpt-6-astra"),
+            ("guildmaster", "reasoning_effort", "none", "reasoning_effort"),
+        ):
+            invalid_condition = json.loads(json.dumps(mixed_rows))
+            target = next(
+                event
+                for attempt in invalid_condition[0]["attempts"]
+                for event in attempt["stages"]
+                if event.get("named_role") == named_role
+            )
+            target[field] = invalid_value
+            write_rows(malformed, invalid_condition)
+            rejected = run("--validate-results", str(malformed))
+            require(rejected.returncode == 2 and message in rejected.stderr, f"invalid {named_role} {field} was accepted")
+
+        no_condition_manifest = json.loads(json.dumps(manifest))
+        no_condition_manifest.pop("conditions")
+        no_condition_manifest_path = Path(directory) / "no-condition-manifest.yaml"
+        no_condition_manifest_path.write_text(json.dumps(no_condition_manifest, ensure_ascii=False), encoding="utf-8")
+        rejected = run(
+            "--manifest",
+            str(no_condition_manifest_path),
+            "--validate-results",
+            str(mixed_fixture),
+        )
+        require(rejected.returncode == 2 and "condition_id is undeclared" in rejected.stderr, "legacy manifest accepted a condition it does not declare")
+
+        retry_same_condition = json.loads(json.dumps(mixed_rows))
+        duplicate_condition_row = json.loads(json.dumps(retry_same_condition[0]))
+        duplicate_condition_row["run_id"] = duplicate_condition_row["provenance"]["run_id"]
+        duplicate_condition_row["provenance"]["run_id"] += "-duplicate"
+        for attempt in duplicate_condition_row["attempts"]:
+            for event in attempt["stages"]:
+                event["invocation_id"] += "-duplicate"
+        retry_same_condition.append(duplicate_condition_row)
+        write_rows(malformed, retry_same_condition)
+        rejected = run("--validate-results", str(malformed))
+        require(rejected.returncode == 2 and "duplicate task/strategy result" in rejected.stderr, "duplicate condition/run result was accepted")
+
         legacy_manifest = json.loads(json.dumps(manifest))
         legacy_manifest["profiles"].pop("flow3")
+        legacy_manifest.pop("conditions")
         legacy_manifest_path = Path(directory) / "legacy-manifest.yaml"
         legacy_manifest_path.write_text(json.dumps(legacy_manifest, ensure_ascii=False), encoding="utf-8")
         legacy_valid = run(

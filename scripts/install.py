@@ -633,31 +633,41 @@ def distribution_config_snippet(source: Path) -> str:
     # Keep user-owned guidance focused on the settings that determine this
     # distribution's orchestration behavior, while taking their values from
     # the actual source config instead of duplicating defaults here.
-    root_keys = ("model", "model_context_window")
+    root_keys = ("model", "model_context_window", "model_auto_compact_token_limit")
+    agent_keys = (
+        "enabled",
+        "max_concurrent_threads_per_session",
+        "default_subagent_model",
+        "default_subagent_reasoning_effort",
+    )
     agents = parsed.get("agents")
     features = parsed.get("features")
     context_management = features.get("context_management") if isinstance(features, dict) else None
     if (
         all(key in parsed for key in root_keys)
         and isinstance(agents, dict)
-        and all(key in agents for key in ("enabled", "max_concurrent_threads_per_session"))
+        and all(key in agents for key in agent_keys)
         and isinstance(features, dict)
         and "multi_agent" in features
         and isinstance(context_management, dict)
         and "experimental_mode" in context_management
     ):
-        required_values = [parsed[key] for key in root_keys] + [
-            agents[key] for key in ("enabled", "max_concurrent_threads_per_session")
-        ] + [features["multi_agent"], context_management["experimental_mode"]]
+        required_values = [parsed[key] for key in root_keys] + [agents[key] for key in agent_keys] + [
+            features["multi_agent"], context_management["experimental_mode"]
+        ]
         if not (
             isinstance(required_values[0], str)
             and isinstance(required_values[1], int)
             and not isinstance(required_values[1], bool)
-            and isinstance(required_values[2], bool)
-            and isinstance(required_values[3], int)
-            and not isinstance(required_values[3], bool)
-            and isinstance(required_values[4], bool)
-            and isinstance(required_values[5], bool)
+            and isinstance(required_values[2], int)
+            and not isinstance(required_values[2], bool)
+            and isinstance(required_values[3], bool)
+            and isinstance(required_values[4], int)
+            and not isinstance(required_values[4], bool)
+            and isinstance(required_values[5], str)
+            and isinstance(required_values[6], str)
+            and isinstance(required_values[7], bool)
+            and isinstance(required_values[8], bool)
         ):
             return text.strip()
 
@@ -677,7 +687,7 @@ def distribution_config_snippet(source: Path) -> str:
                 *(f"{key} = {toml_literal(parsed[key])}" for key in root_keys),
                 "",
                 "[agents]",
-                *(f"{key} = {toml_literal(agents[key])}" for key in ("enabled", "max_concurrent_threads_per_session")),
+                *(f"{key} = {toml_literal(agents[key])}" for key in agent_keys),
                 "",
                 "[features]",
                 f"multi_agent = {toml_literal(features['multi_agent'])}",
@@ -695,7 +705,7 @@ def build_next_steps(target: Path, config_mode: str, *, config_snippet: str | No
         f"Open and trust the parent directory in Codex, then start a fresh local task there: {target}.",
         f"CLI startup: codex --cd {target}",
         "Keep the session cwd at the parent. Pass an explicit child Git root to coding tasks and all Git/snapshot helpers.",
-        "利用者が選んだ推論レベルのgpt-6-astra、100万コンテキスト、実験的コンテキスト管理、標準Skill、Luna/maxのadventurer・scholar・verifier・sentinel、inquisitor（Astra/xhigh）、サブエージェント上限8（通常2〜4体、ホストの空き枠内）を確認してください。",
+        "利用者が選んだ推論レベルのgpt-6-astra、100万コンテキストと90万tokenでの自動compact、実験的コンテキスト管理、標準Skill、default subagent（GPT-6 Luna/max）、adventurer・scholar・verifier（GPT-6 Luna/max）、sentinel（GPT-6 Sol/xhigh）、inquisitor（GPT-6 Astra/xhigh）、サブエージェント上限8（通常2〜4体、ホストの空き枠内）を確認してください。",
         "Starting Codex directly inside a child Git repository is not the supported shared-config entry point: Git boundaries can stop parent discovery.",
         "Review child AGENTS.override.md/AGENTS.md and local settings before working there. A child config is not silently merged into a parent-started session; child-started sessions may load it instead.",
     ]

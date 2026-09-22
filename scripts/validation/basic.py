@@ -19,10 +19,10 @@ CORE_SKILLS = {
 MAINTAINER_SKILLS = {"orchestra-contract-validation", "orchestra-runtime-security-audit"}
 OPTIONAL_SKILLS = {"create-skill-candidate-from-gap", "open-subrepo-in-vscode"}
 AGENTS = {
-    "adventurer": ("gpt-5.6-luna", "max", "workspace-write"),
-    "scholar": ("gpt-5.6-luna", "max", "read-only"),
-    "verifier": ("gpt-5.6-luna", "max", "workspace-write"),
-    "sentinel": ("gpt-5.6-luna", "max", "read-only"),
+    "adventurer": ("gpt-6-luna", "max", "workspace-write"),
+    "scholar": ("gpt-6-luna", "max", "read-only"),
+    "verifier": ("gpt-6-luna", "max", "workspace-write"),
+    "sentinel": ("gpt-6-sol", "xhigh", "read-only"),
     "inquisitor": ("gpt-6-astra", "xhigh", "read-only"),
 }
 
@@ -78,7 +78,7 @@ def validate_codex_config() -> None:
     )
     require(agents_config.get("enabled") is True, "agents.enabled must be true")
     require(agents_config.get("max_concurrent_threads_per_session") == 8, "max concurrent subagent threads must be 8")
-    require(agents_config.get("default_subagent_model") == "gpt-5.6-luna", "default subagent model must be Luna")
+    require(agents_config.get("default_subagent_model") == "gpt-6-luna", "default subagent model must be gpt-6-luna")
     require(agents_config.get("default_subagent_reasoning_effort") == "max", "default subagent reasoning effort must be max")
     features_config = config.get("features")
     require(

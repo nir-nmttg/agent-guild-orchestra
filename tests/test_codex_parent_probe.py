@@ -105,7 +105,7 @@ class ProbeHelpersTests(unittest.TestCase):
                         "item": {
                             "type": "collabAgentToolCall",
                             "tool": "spawnAgent",
-                            "model": "gpt-5.6-luna",
+                            "model": "gpt-6-luna",
                             "reasoningEffort": "max",
                             "receiverThreadIds": ["child"],
                             "agentsStates": {"child": {"status": "completed", "message": "model prose"}},
@@ -128,6 +128,7 @@ class ProbeHelpersTests(unittest.TestCase):
                 self.spawn_count = 0
                 self.roles = list(roles or probe.EXPECTED)
                 self.metadata_roles = {}
+                self.metadata_overrides = {}
 
             def call(self, method, params, timeout=20):
                 if method == "turn/start":
@@ -140,7 +141,9 @@ class ProbeHelpersTests(unittest.TestCase):
                     agent = thread_id.removeprefix("child-")
                     want = probe.EXPECTED[agent]
                     role = self.metadata_roles.get(agent, agent)
-                    return {"result": {"thread": {"id": thread_id, "parentThreadId": "parent", "agentNickname": agent, "agentRole": role, "model": want["model"], "reasoningEffort": want["effort"], "cwd": "child"}}}
+                    metadata = {"id": thread_id, "parentThreadId": "parent", "agentNickname": agent, "agentRole": role, "model": want["model"], "reasoningEffort": want["effort"], "cwd": "child"}
+                    metadata.update(self.metadata_overrides.get(agent, {}))
+                    return {"result": {"thread": metadata}}
                 raise AssertionError(method)
 
             def wait_turn(self, thread_id, timeout):
@@ -160,6 +163,10 @@ class ProbeHelpersTests(unittest.TestCase):
             self.assertEqual(evidence["declaration"], probe.EXPECTED[role])
             self.assertEqual(evidence["observation"]["spawnEventCount"], 1)
             self.assertEqual(evidence["observation"]["childMetadataMatches"], 1)
+        sentinel = native["evidence"]["expected"]["sentinel"]
+        self.assertEqual(sentinel["declaration"], {"model": "gpt-6-sol", "effort": "xhigh", "sandbox": "read-only"})
+        self.assertEqual(sentinel["observation"]["spawnEventCount"], 1)
+        self.assertEqual(sentinel["observation"]["childMetadataMatches"], 1)
         self.assertEqual(permission["status"], "unknown")
 
         options = probe.parse_args(["--live", "--role", "scholar", "--role", "sentinel"])
@@ -179,3 +186,65 @@ class ProbeHelpersTests(unittest.TestCase):
         native, _ = probe.live_probe(rpc, "parent", Path("parent"), Path("child"), 1)
         self.assertEqual(native["status"], "failed")
         self.assertEqual(native["evidence"]["expected"]["scholar"]["status"], "failed")
+
+    def test_sentinel_live_observation_requires_its_name_model_and_effort(self) -> None:
+        class FakeRpc:
+            def __init__(self, metadata_role="sentinel", overrides=None):
+                self.messages = []
+                self.metadata_role = metadata_role
+                self.overrides = overrides or {}
+
+            def call(self, method, params, timeout=20):
+                if method == "turn/start":
+                    return {"result": {"turn": {"id": "sentinel-turn"}}}
+                if method == "thread/read":
+                    thread_id = params["threadId"]
+                    if thread_id == "parent":
+                        return {"result": {"thread": {"model": "gpt-6-astra", "reasoningEffort": "xhigh", "cwd": "parent"}}}
+                    metadata = {
+                        "id": thread_id,
+                        "parentThreadId": "parent",
+                        "agentNickname": "sentinel",
+                        "agentRole": self.metadata_role,
+                        "model": "gpt-6-sol",
+                        "reasoningEffort": "xhigh",
+                        "cwd": "child",
+                    }
+                    metadata.update(self.overrides)
+                    return {"result": {"thread": metadata}}
+                raise AssertionError(method)
+
+            def wait_turn(self, thread_id, timeout):
+                self.messages.append({"method": "item/completed", "params": {"threadId": "parent", "item": {"type": "collabAgentToolCall", "tool": "spawnAgent", "model": "gpt-6-sol", "reasoningEffort": "xhigh", "receiverThreadIds": ["child-sentinel"], "agentsStates": {}, "status": "completed"}}})
+                return "completed"
+
+        cases = (
+            ("inquisitor", {}, "role"),
+            ("sentinel", {"model": "gpt-6-astra"}, "model"),
+            ("sentinel", {"reasoningEffort": "max"}, "effort"),
+        )
+        for role, overrides, mismatch in cases:
+            with self.subTest(mismatch=mismatch):
+                native, _ = probe.live_probe(
+                    FakeRpc(metadata_role=role, overrides=overrides),
+                    "parent", Path("parent"), Path("child"), 1, ("sentinel",),
+                )
+                self.assertEqual(native["status"], "failed")
+                self.assertEqual(native["evidence"]["expected"]["sentinel"]["status"], "failed")
+
+    def test_config_view_captures_default_subagent_and_compaction_settings(self) -> None:
+        actual = probe.config_view({"config": {
+            "model": "gpt-6-astra",
+            "model_context_window": 1_000_000,
+            "model_auto_compact_token_limit": 900_000,
+            "agents": {
+                "enabled": True,
+                "max_concurrent_threads_per_session": 8,
+                "default_subagent_model": "gpt-6-luna",
+                "default_subagent_reasoning_effort": "max",
+            },
+            "features": {"multi_agent": True},
+        }})
+        self.assertEqual(actual["autoCompactTokenLimit"], 900_000)
+        self.assertEqual(actual["defaultSubagentModel"], "gpt-6-luna")
+        self.assertEqual(actual["defaultSubagentReasoningEffort"], "max")

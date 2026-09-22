@@ -1,10 +1,10 @@
 # モデル選択評価
 
-この評価は、Astra-onlyと適応型のAstra+Luna maxの実際のタスク結果を、同じタスクの評価基準と検証で記録するための小さなパイロット/ホールドアウト手順です。評価条件ではAstra/highのRoot、Luna Adventurer / max、独立Astra / xhighレビュアーを使います。v2.4の条件や固定したワーカー/レビュー構成は現行比較の必須条件ではありません。設定プロファイルを変えた結果は、同じJSONLに記録してもプロファイル別に集計します。
+この評価は、同じタスクの評価基準と検証を使い、実際のモデル構成ごとの結果をパイロット/ホールドアウトで記録します。既存v3記録ではAstra/highのRoot、Luna 5.6 / maxのワーカー、独立Astra / xhighレビュアーを使います。追加条件`mixed-luna-v1`は、RootのAstra推論レベルを許可リストから選び、Adventurer / Scholar / VerifierにGPT-6 Luna / max、SentinelにGPT-6 Sol / xhigh、InquisitorにAstra / xhighを割り当てます。どの条件も同じJSONLへ記録できますが、条件IDごとに独立して検証・集計します。
 
-## 比較する二つの条件
+## 既存v3で比較する二つのstrategy
 
-`scripts/model_selection_eval.yaml`の評価構成は次の二つだけです。
+旧v3から維持するstrategyは次の二つです。
 
 1. `astra_only`: Astra/highのRootがタスクを直接実装します。ワーカーは記録しません。リスクのあるタスクだけ独立Astra/xhighレビューを付けます。
 2. `astra_luna`: Astra/highのRootが必要と判断した時だけLuna/maxワーカーへ委譲します。ワーカー数はタスクごとに可変で、同じタスクで独立ワーカーを複数記録できます。リスクのあるタスクのレビューは独立Astra/xhighです。
@@ -13,11 +13,15 @@
 
 `model_selection_eval.yaml`の`profiles`は、`solo`（子枠1）、`current3`（役割追加前の旧構成、子上限3）、`split3`、`split4`、`split6`、`split8`、`flow3`を定義します。`solo`でも高リスクタスクには独立Astraレビューを記録するため、子枠は0ではありません。結果行の任意フィールド`profile`はこの値に、任意フィールド`run_id`は同じタスク・戦略を反復したときの一意な記録IDにします。旧記録のこれらのフィールドは欠測のまま受理し、集計では`profile: "unknown"`とします。`provenance.run_id`は従来どおり必須で、トップレベル`run_id`がない旧記録ではその値を記録IDとして使います。明示したプロファイルでは、すべての実行段階に`named_role`を付けます。`current3`で使える子役は`adventurer`、`scholar`、`inquisitor`（Rootは`guildmaster`または`root`）で、`verifier`と`sentinel`は`split*`と`flow3`で使います。
 
-旧6プロファイルのマニフェストと、`profiles`を持たない旧形式も引き続き受理します。`flow3`の結果を扱う場合は、その定義を持つ新しいマニフェストを使います。未宣言のプロファイルは推測して補いません。
+`condition_id: "mixed-luna-v1"`は旧プロファイルと別に宣言した混合モデル条件です。各イベントに`named_role`が必須で、Root / GuildmasterはGPT-6 Astra、推論レベルは`low`、`medium`、`high`、`xhigh`、`max`、`ultra`から選びます。`high`以外を使う場合は`provenance.root_override`も`true`にします。Adventurer、Scholar、VerifierはGPT-6 Luna / max、SentinelはGPT-6 Sol / xhigh、InquisitorはGPT-6 Astra / xhighです。RootのモデルとInquisitorのモデル/推論レベル、各役の会計ロールは変更できません。条件IDはマニフェストに宣言された`mixed-luna-v1`だけを受理し、誤記や未宣言条件を拒否します。この条件に`profile`を併記できません。各`condition_id`・Root model/effortの組み合わせについて、分割内の全タスクを要求し、異なるRoot effortの部分行で互いのcoverageを満たすことはできません。
+
+新条件のパイロットとホールドアウトを比較するときは、同じ役割と割当、Root effort、並列上限、設定/プロンプト/Skillのダイジェスト、受け入れ条件、ホスト、コンテキスト条件を使います。いずれかを変える場合は別の`condition_id`として記録し、来歴ダイジェストを残します。
+
+旧6プロファイルのマニフェストと、`profiles`を持たない旧形式も引き続き受理します。旧v3の戦略・プロファイルに記録済みのモデル割当は変更せず、過去の行を現在のテンプレートや混合条件から再解釈しません。`flow3`や`mixed-luna-v1`の結果を扱う場合は、その定義を持つマニフェストを使います。未宣言のプロファイルや条件IDは推測して補いません。
 
 ### 同じ人数で運用を比べる
 
-最初は`split3`を現行の役割分割、`flow3`を部分結果・検証準備・依存関係の優先・粒度調整を加えた運用として比較します。両方とも子上限3で、Rootの有効な推論レベル、Luna/max、受け入れ条件、ホスト、コンテキスト設定をそろえます。`split3`では改善前、`flow3`では改善後の運用プロンプトとSkill一式をそれぞれ固定して使います。`current3`を現在版の基準と取り違えません。プロファイル名だけでは運用を実施した証拠にならず、設定・プロンプト・Skillのダイジェストと実際の委譲・通知・検証の記録を残します。
+最初は`split3`を現行の役割分割、`flow3`を部分結果・検証準備・依存関係の優先・粒度調整を加えた運用として比較します。両方とも子上限3で、Rootの有効な推論レベル、Luna/max、受け入れ条件、ホスト、コンテキスト設定をそろえます。`split3`では改善前、`flow3`では改善後の運用プロンプトとSkill一式をそれぞれ固定して使います。`current3`を現在版の基準と取り違えません。プロファイル名だけでは運用を実施した証拠にならず、設定・プロンプト・Skillのダイジェストと実際の委譲・通知・検証の記録を残します。混合条件でも、同じ`condition_id`内の比較では役割数と並列上限、Root effort、設定一式を固定します。
 
 実行順とキャッシュ・ホスト混雑を記録し、同じタスクを新しいコンテキストとクリーンなチェックアウトで反復します。受け入れ合格率、初回合格率、重大な見落としを先に比較し、品質が悪化しない条件で全試行を含む完了時間と使用量を評価します。待ち・手戻りが減った作業種別から適用し、人数の変更は別の比較にします。現行の4タスクだけで全用途への一般化や統計的な非劣性を主張しません。
 
@@ -33,7 +37,7 @@
 
 JSONLの1行が1つのタスク/評価構成結果です。既存の`task_id`、`strategy`、`split`、`accepted`、`task_input`、`acceptance_evidence`、`provenance`を保持し、`grade_refs`を追加します。`attempts`は1から連番で、各試行は評価基準の結果としての`accepted`、`wall_time_seconds`、`wall_time_source`、実行した`stages`を持ちます。`accepted=false`は、失敗した実行段階と`failure_evidence`を伴う実行エラー、または全実行段階が`completed`でも評価基準を満たさない品質失敗のどちらも記録できます。再試行前の品質失敗も分母から除かず、最終試行の結果は記録の`accepted`と一致させます。
 
-各実行段階は`sequence`、一意の`invocation_id`、`role`（`root` / `worker` / `review`）、有効な`model` / `reasoning_effort`、`status`、`failure_evidence`、`usage`、`elapsed_seconds`、再現可能な`evidence_refs`を持ちます。`named_role`は`guildmaster` / `root` / `scholar` / `adventurer` / `verifier` / `sentinel` / `inquisitor`のいずれかで、明示したプロファイルでは必須、旧形式（プロファイルなし）では任意です。Verifier/Sentinelは会計上`worker`、AstraのInquisitorは`review`です。役名を付けた場合は対応するモデル・推論レベルと会計ロールの一致を検証し、プロファイルが役割を制限する場合はその制限も検証します。`sequence`は記録された実行順を表します。Astra-onlyのワーカーは拒否されますが、Astra+Lunaのワーカー数は0以上です。タスクの`review_required`が`true`なら最終試行へレビューを含めます。並列実行や再試行の数をこのバリデーターが知らないため、実際の全呼び出しを記録する責任は実行担当/Rootに残ります。
+各実行段階は`sequence`、一意の`invocation_id`、`role`（`root` / `worker` / `review`）、有効な`model` / `reasoning_effort`、`status`、`failure_evidence`、`usage`、`elapsed_seconds`、再現可能な`evidence_refs`を持ちます。`named_role`は`guildmaster` / `root` / `scholar` / `adventurer` / `verifier` / `sentinel` / `inquisitor`のいずれかです。明示した旧プロファイルと`condition_id`では必須、旧形式では任意です。Verifier/Sentinelは会計上`worker`、Inquisitorは`review`です。役名を付けた場合は、その行の評価条件に対応するモデル・推論レベルと会計ロールの一致を検証します。旧条件ではVerifier/Sentinelも従来のLuna / max割当を維持し、`mixed-luna-v1`では条件宣言どおりGPT-6 LunaとGPT-6 Solへ分けます。`sequence`は記録された実行順を表します。Astra-onlyのワーカーは拒否されますが、Astra+Lunaのワーカー数は0以上です。タスクの`review_required`が`true`なら最終試行へレビューを含めます。並列実行や再試行の数をこのバリデーターが知らないため、実際の全呼び出しを記録する責任は実行担当/Rootに残ります。
 
 子ターンの実時間を測る場合だけ、イベントへ`start_time`と`end_time`をペアで記録します。値は非負の数値、またはタイムゾーン付きISO-8601です。片方だけの時刻、逆順の時刻は拒否します。両方を`null`にするか両方を欠測にした子ターンは受理しますが、他の子ターンだけ時刻があっても、その試行の`max_parallel_child_turns`は`unknown`として集計し、失敗や使用量の分母から行を外しません。集計の`max_parallel_child_turns`は区間の重なりから算出したworker/reviewターンの最大数であり、設定枠の「開いたthread数」ではありません。設定枠を観測できた場合は試行へ`max_open_threads`と`max_open_threads_source`を記録し、別の集計値として出します。既知の時間区間から求めたピークが測定した`max_open_threads`より大きい場合は記録を拒否します。プロファイル上限超過も拒否します。旧記録や不完全な新記録の集計値は`unknown`で、0へ変換しません。
 
@@ -60,7 +64,7 @@ python3 scripts/model_selection_eval.py --validate-results /path/to/results.json
 python3 scripts/model_selection_eval.py --summarize /path/to/results.jsonl
 ~~~
 
-集計は有効なRootモデル/推論レベルと`profile`ごとにグループを分け、各グループの`run_ids`（反復ID）を保持します。グループを反復IDごとに分割しないため、同じタスクの複数回実行もタスク分母へ残ります。タスク分母を保った合格件数（`accepted`）、試行/実行段階/レビュー/ワーカー件数、役割別usage、出典付きトークン、Codex使用量、API費用、実経過時間、開いたthreadの最大数、子ターンの実並列数を出します。役割別usageは従来の全体usageと併記します。プロファイルを付けない旧記録は、splitごとに従来どおり両戦略・全タスクの行を要求します。明示したプロファイルは、表された各プロファイルについて、そのプロファイルの戦略のsplit内全タスクを要求します。未使用のプロファイルまで実施することは要求しません。統計的優越、非劣性、費用削減を自動で主張しません。パイロット/ホールドアウトの比較には、同じ検証、外部評価、実際の権限/モデル/新しいコンテキストのイベント、全再試行/失敗、適切なホスト使用量の証拠が必要です。
+集計は有効なRootモデル/推論レベル、`profile`、`condition_id`ごとにグループを分け、各グループの`run_ids`（反復ID）を保持します。グループを反復IDごとに分割しないため、同じタスクの複数回実行もタスク分母へ残ります。タスク分母を保った合格件数（`accepted`）、試行/実行段階/レビュー/ワーカー件数、役割別usage、出典付きトークン、Codex使用量、API費用、実経過時間、開いたthreadの最大数、子ターンの実並列数を出します。役割別usageは従来の全体usageと併記します。プロファイルも条件IDも付けない旧記録は、splitごとに従来どおり両戦略・全タスクの行を要求します。明示した各プロファイルはその戦略のsplit内全タスクを、明示した各条件IDはその条件の各Rootモデル/effort groupについて戦略のsplit内全タスクを要求します。未使用のプロファイルや条件まで実施することは要求しません。統計的優越、非劣性、費用削減を自動で主張しません。パイロット/ホールドアウトの比較には、同じ検証、外部評価、実際の権限/モデル/新しいコンテキストのイベント、全再試行/失敗、適切なホスト使用量の証拠が必要です。
 
 追加集計も同じグループと全タスクの分母を使います。
 
@@ -75,4 +79,4 @@ python3 scripts/model_selection_eval.py --summarize /path/to/results.jsonl
 
 あるタスクの一試行でも時間が欠測なら、そのタスクを`unknown_count`に数えます。グループに不明なタスクがあれば、観測できたタスクだけで代表値を出さず、中央値・p90・最大値と`basis`を不明にします。既知の0秒は欠測と区別します。`basis`は`observed`、`manual`、`synthetic`、または`unknown`です。旧記録は新しい計測を補完せず受理し、既存の集計項目を維持します。手入力の時間分布は`manual`として記述的に集計し、観測値だけを合計する従来の`total_wall_time_seconds`とは出典の扱いを区別します。
 
-`scripts/validation/fixtures/model_eval_offline.jsonl`は`synthetic`と明記したパイロットフィクスチャです。直接実装・レビューなし、状況に応じた委譲でワーカーなし、重大なリスクのレビュー、複数ワーカー、再試行前の品質失敗、最終品質失敗、誤った役割・モデル・実行順、呼び出しの重複、失敗の証拠の欠落、Root推論レベル上書き、実行を観測した記録の来歴のバリデーター経路を確認します。これは実際のベンチマークではなく、品質、ホスト割り当て上限、API費用、費用削減の証拠ではありません。
+`scripts/validation/fixtures/model_eval_offline.jsonl`は`synthetic`と明記した従来のパイロットフィクスチャです。直接実装・レビューなし、状況に応じた委譲でワーカーなし、重大なリスクのレビュー、複数ワーカー、再試行前の品質失敗、最終品質失敗、誤った役割・モデル・実行順、呼び出しの重複、失敗の証拠の欠落、Root推論レベル上書き、実行を観測した記録の来歴のバリデーター経路を確認します。`model_eval_mixed_condition.jsonl`は新条件専用の合成フィクスチャで、3役のGPT-6 LunaとGPT-6 Sol Sentinelの記録・割当・集計を検証します。どちらも実際のベンチマークではなく、品質、ホスト割り当て上限、API費用、費用削減の証拠ではありません。

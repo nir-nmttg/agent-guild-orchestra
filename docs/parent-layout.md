@@ -8,8 +8,10 @@
   ├── AGENTS.md / .codex / .agents  ← Dockerインストーラーがここだけを管理
   │       ↓ 親を開いたCodexセッションが読み込む
   │   Guildmaster: Astra（推論レベルは利用者が選択）
-  │       ├── Adventurer: Luna / max
-  │       ├── Scholar: Luna / max / read-only
+  │       ├── Adventurer: GPT-6 Luna / max
+  │       ├── Scholar: GPT-6 Luna / max / read-only
+  │       ├── Verifier: GPT-6 Luna / max / 指定テスト・生成物のみ書込み
+  │       ├── Sentinel: GPT-6 Sol / xhigh / read-only
   │       └── Inquisitor: Astra / xhigh / read-only
   │
   └── repositories/                ← 通常の導入・更新では読み取り専用でマウント
@@ -40,6 +42,8 @@ AGENTS.mdはプロジェクトルートからcwdまで探索し、プロジェ�
 
 ## 実機で確認した範囲
 
+以下の2026-09-06と2026-09-10の記録はGPT-5.6 Lunaを使う当時の構成です。GPT-6 Luna/Solへの移行後の実起動を確認した記録ではありません。
+
 2026-09-06、macOSのCodex Desktop付属CLI **0.153.3**のapp-serverで、保守担当者専用の[`scripts/check_codex_parent.py`](../scripts/check_codex_parent.py)を実行しました。スクリプトは現行`template`を一時的なGit管理外の親へ導入し、その下に一時子Gitルートを作ります。子には親と衝突する`model`と`agents.enabled`、子専用Skillを置きます。検証専用の一時`CODEX_HOME`には信頼設定だけを書き、既存の認証情報がある場合も`auth.json`をシンボリックリンクで参照します。実利用者の設定や対象リポジトリは変更せず、認証情報とモデルの回答本文を結果JSONへ保存しません。結果は指定パスまたはOSの一時ディレクトリへ出力し、通常実行はモデル呼び出しを行いません。
 
 | 確認 | 結果 |
@@ -66,7 +70,9 @@ AGENTS.mdはプロジェクトルートからcwdまで探索し、プロジェ�
 | 実際の8体並列と性能 | 未検証。上限8の読み込みは8体の実行や改善の証拠ではない |
 | 追加役の限定実起動 | `--live --role verifier --role sentinel --live-timeout 45`を実行。最初のVerifier要求で`responseStreamDisconnected`の再試行可能な通知を受け停止。spawnイベント・子メタデータ0件、Sentinel未着手。実起動と子の実効権限はunknown |
 
-構成の宣言検査に加え、オフラインの導入テストでは旧3役・上限3から5役・上限8への更新を確認します。既存の親独自ファイル、子リポジトリ、Gitの状態は保持し、再同期が不要な書き込みをしないことを確認します。
+構成の宣言検査に加え、オフラインの導入テストでは旧3役・上限3から5役・上限8への更新と、GPT-5.6 Lunaを使う旧5役からGPT-6 Luna/Solを使う新5役への更新を確認します。既存の親独自ファイル、子リポジトリ、Gitの状態は保持し、再同期が不要な書き込みをしないことを確認します。ユーザー管理の設定は保持して必要設定を案内し、管理対象への独自編集と新配布内容が衝突した場合は書き込み前に停止することも検証します。
+
+現在のprobeは、3役のGPT-6 Luna/max、SentinelのGPT-6 Sol/xhigh、InquisitorのGPT-6 Astra/xhighを期待値として検査します。宣言の一致、合成イベントの検証、実際の名前付き起動は別の証拠です。移行後の実起動・実効権限・品質・速度は未確認であり、設定更新だけで確認済みにはしません。導入先への反映手順は[GPT-6移行ガイド](migration-gpt6.md)を参照してください。
 
 ## 導入・移行の検証
 
