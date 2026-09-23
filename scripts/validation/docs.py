@@ -59,6 +59,6 @@ def validate_docs() -> None:
     validate_local_links()
     validate_skill_packages()
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    require("3.1.0" in readme, "README must identify release 3.1.0")
+    require("3.2.0" in readme, "README must identify release 3.2.0")
     require((ROOT / "docs/migration-v3.md").is_file(), "v3 migration guide is missing")
     require((ROOT / "docs/model-selection-evaluation.md").is_file(), "evaluation protocol is missing")
