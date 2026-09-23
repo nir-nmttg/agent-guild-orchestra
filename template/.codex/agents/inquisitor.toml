@@ -3,7 +3,7 @@ description = "重大なリスクがある変更を独立した読み取り専�
 model = "gpt-6-astra"
 model_context_window = 1000000
 model_auto_compact_token_limit = 900000
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "max"
 sandbox_mode = "read-only"
 
 developer_instructions = """

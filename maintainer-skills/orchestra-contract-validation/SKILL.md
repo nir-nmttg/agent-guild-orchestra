@@ -8,7 +8,7 @@ metadata:
 
 # 契約検証
 
-リポジトリの配布物と検証経路が、推論レベル未固定のAstra Root、Luna/maxのAdventurer・Scholar・Verifier・Sentinel、Astra/xhigh Inquisitor、標準/追加用/保守担当者用 Skill、状態を持たない Git/スナップショット契約に一致するかを読み取り専用で確認します。明示的な呼び出し専用です。
+リポジトリの配布物と検証経路が、通常xhigh推奨・利用者の選択を優先し推論レベル未固定のAstra Root、GPT-6 Luna/maxのAdventurer・Scholar・Verifier、GPT-6 Sol/xhigh Sentinel、Astra/max Inquisitor、標準/追加用/保守担当者用 Skill、状態を持たない Git/スナップショット契約に一致するかを読み取り専用で確認します。明示的な呼び出し専用です。
 
 ## 使う時
 

@@ -109,6 +109,9 @@ class ParentInstallTests(unittest.TestCase):
         self.assertEqual(len(role_files), 5)
         for path in role_files:
             if path.stem == "inquisitor":
+                path.write_text(path.read_text(encoding="utf-8").replace(
+                    'model_reasoning_effort = "max"', 'model_reasoning_effort = "xhigh"',
+                ), encoding="utf-8")
                 continue
             lines = path.read_text(encoding="utf-8").splitlines()
             lines = [
@@ -147,7 +150,7 @@ class ParentInstallTests(unittest.TestCase):
         self.assert_children_unchanged()
 
     def test_custom_parent_config_and_user_agents_are_preserved(self):
-        config = put(self.parent, ".codex/config.toml", 'model = "my-model"\n')
+        config = put(self.parent, ".codex/config.toml", 'model = "my-model"\nmodel_reasoning_effort = "high"\n')
         config.chmod(0o600)
         agents = put(self.parent, "AGENTS.md", "User instructions\n")
         agents.chmod(0o600)
@@ -168,7 +171,7 @@ class ParentInstallTests(unittest.TestCase):
         for role_setting in (
             "adventurer・scholar・verifier（GPT-6 Luna/max）",
             "sentinel（GPT-6 Sol/xhigh）",
-            "inquisitor（GPT-6 Astra/xhigh）",
+            "inquisitor（GPT-6 Astra/max）",
         ):
             self.assertIn(role_setting, role_guidance)
         self.run_install()
@@ -214,9 +217,8 @@ class ParentInstallTests(unittest.TestCase):
         before = tree(self.parent)
         dry = self.run_install("--dry-run")
         self.assertEqual(tree(self.parent), before)
-        for role in ("adventurer", "scholar", "verifier", "sentinel"):
+        for role in role_names:
             self.assertIn({"action": "update", "path": f".codex/agents/{role}.toml"}, dry["actions"])
-        self.assertNotIn({"action": "update", "path": ".codex/agents/inquisitor.toml"}, dry["actions"])
         self.assertIn({"action": "update", "path": ".codex/config.toml"}, dry["actions"])
 
         self.run_install()
@@ -228,14 +230,13 @@ class ParentInstallTests(unittest.TestCase):
             "scholar": ("gpt-6-luna", "max"),
             "verifier": ("gpt-6-luna", "max"),
             "sentinel": ("gpt-6-sol", "xhigh"),
-            "inquisitor": ("gpt-6-astra", "xhigh"),
+            "inquisitor": ("gpt-6-astra", "max"),
         }
-        unchanged_inquisitor = previous_models["inquisitor"]
         for role, expected in expected_models.items():
             installed_role = tomllib.loads((self.parent / f".codex/agents/{role}.toml").read_text())
             self.assertEqual((installed_role["model"], installed_role["model_reasoning_effort"]), expected)
-        self.assertEqual(expected_models["inquisitor"], unchanged_inquisitor)
         installed = tomllib.loads((self.parent / ".codex/config.toml").read_text())
+        self.assertNotIn("model_reasoning_effort", installed)
         self.assertEqual(installed["agents"]["max_concurrent_threads_per_session"], 8)
         self.assertEqual(installed["agents"]["default_subagent_model"], "gpt-6-luna")
         self.assertEqual(installed["agents"]["default_subagent_reasoning_effort"], "max")
@@ -244,6 +245,37 @@ class ParentInstallTests(unittest.TestCase):
         self.assertEqual(tree(self.parent / "repositories"), children_before)
         self.assertIn(".codex/agents/verifier.toml", install.load_manifest(self.parent)["files"])
         self.assertIn(".codex/agents/sentinel.toml", install.load_manifest(self.parent)["files"])
+        with patch.object(install, "write_atomic", side_effect=AssertionError("no-op wrote a file")):
+            self.run_install()
+        self.assert_children_unchanged()
+
+    def test_update_migrates_inquisitor_effort_from_gpt6_distribution(self):
+        source = self.base / "previous-gpt6-template"
+        shutil.copytree(ROOT / "template", source)
+        role_path = ".codex/agents/inquisitor.toml"
+        previous = source / role_path
+        previous.write_text(previous.read_text().replace(
+            'model_reasoning_effort = "max"', 'model_reasoning_effort = "xhigh"',
+        ))
+        self.run_install("--source", str(source), "--allow-non-default-source")
+        children_before = tree(self.parent / "repositories")
+        before = tree(self.parent)
+        dry = self.run_install("--dry-run")
+        self.assertEqual(tree(self.parent), before)
+        updates = [action for action in dry["actions"] if action["action"] == "update"]
+        self.assertEqual(updates, [
+            {"action": "update", "path": role_path},
+            {"action": "update", "path": str(install.MANIFEST_REL)},
+        ])
+
+        self.run_install()
+        inquisitor = tomllib.loads((self.parent / role_path).read_text())
+        self.assertEqual((inquisitor["model"], inquisitor["model_reasoning_effort"]), ("gpt-6-astra", "max"))
+        self.assertEqual(inquisitor["sandbox_mode"], "read-only")
+        self.assertEqual(inquisitor["agents"], {"enabled": False})
+        config = tomllib.loads((self.parent / ".codex/config.toml").read_text())
+        self.assertNotIn("model_reasoning_effort", config)
+        self.assertEqual(tree(self.parent / "repositories"), children_before)
         with patch.object(install, "write_atomic", side_effect=AssertionError("no-op wrote a file")):
             self.run_install()
         self.assert_children_unchanged()

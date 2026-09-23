@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime
 import json
 import math
@@ -26,6 +27,7 @@ STRATEGIES = {"astra_only", "astra_luna"}
 SPLITS = {"pilot", "holdout"}
 ROLES = {"root", "worker", "review"}
 MIXED_CONDITION_ID = "mixed-luna-v1"
+MIXED_V2_CONDITION_ID = "mixed-luna-v2"
 MIXED_ROOT_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"]
 MIXED_CONDITION = {
     "strategy": "astra_luna",
@@ -66,6 +68,12 @@ MIXED_CONDITION = {
             "reasoning_efforts": ["xhigh"],
         },
     },
+}
+MIXED_V2_CONDITION = deepcopy(MIXED_CONDITION)
+MIXED_V2_CONDITION["named_roles"]["inquisitor"]["reasoning_efforts"] = ["max"]
+MIXED_CONDITIONS = {
+    MIXED_CONDITION_ID: MIXED_CONDITION,
+    MIXED_V2_CONDITION_ID: MIXED_V2_CONDITION,
 }
 PROFILE_CAPS = {
     "solo": {"strategy": "astra_only", "max_open_threads": 1},
@@ -382,10 +390,11 @@ def validate_manifest(value: dict[str, Any]) -> None:
 
     conditions = value.get("conditions")
     if conditions is not None:
-        if not isinstance(conditions, dict) or set(conditions) != {MIXED_CONDITION_ID}:
-            raise EvalError(f"conditions may declare only {MIXED_CONDITION_ID}")
-        if conditions[MIXED_CONDITION_ID] != MIXED_CONDITION:
-            raise EvalError(f"condition {MIXED_CONDITION_ID} role/model/effort mapping is fixed")
+        if not isinstance(conditions, dict) or not conditions or not set(conditions).issubset(MIXED_CONDITIONS):
+            raise EvalError(f"conditions may declare only {sorted(MIXED_CONDITIONS)}")
+        for condition_id, definition in conditions.items():
+            if definition != MIXED_CONDITIONS[condition_id]:
+                raise EvalError(f"condition {condition_id} role/model/effort mapping is fixed")
 
     tasks = value.get("tasks")
     if not isinstance(tasks, list) or not tasks:

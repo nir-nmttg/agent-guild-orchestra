@@ -10,7 +10,7 @@ Agent Guild Orchestra 3はCodexのプロジェクト固有設定、五つのカ�
 
 ## Rootと委譲
 
-GuildmasterはAstraで要件、依存関係、分割、難しい判断、統合、最終受け入れを担当し、推論レベルは利用者の選択を尊重します。小さな作業は直接完了し、独立した調査・実装・検証はScholar・Adventurer・Verifierへ渡します。子は追加のエージェントを起動しません。
+GuildmasterはAstraで要件、依存関係、分割、難しい判断、統合、最終受け入れを担当します。推論レベルは通常`xhigh`を推奨し、利用者の選択を優先して配布設定では固定しません。小さな作業は直接完了し、独立した調査・実装・検証はScholar・Adventurer・Verifierへ渡します。子は追加のエージェントを起動しません。
 
 | 役割 | モデル・推論 | 責務と書き込み範囲 |
 | --- | --- | --- |
@@ -18,9 +18,11 @@ GuildmasterはAstraで要件、依存関係、分割、難しい判断、統合�
 | Adventurer | GPT-6 Luna / max | 担当パスの実装と局所テスト。workspace-write |
 | Verifier | GPT-6 Luna / max | 受け入れ条件から独立した検証。workspace-writeだが指定テスト・生成物だけ |
 | Sentinel | GPT-6 Sol / xhigh | 差分と関連箇所の整合性、暗黙の前提、回帰、検証漏れ。read-only |
-| Inquisitor | GPT-6 Astra / xhigh | 重大なリスクの独立レビュー。read-only |
+| Inquisitor | GPT-6 Astra / max | 重大なリスクの独立レビュー。read-only |
 
-`[agents]`の既定値は`default_subagent_model = "gpt-6-luna"`、`default_subagent_reasoning_effort = "max"`です。Scholar・Adventurer・Verifierは同じ組合せ、Sentinelは`gpt-6-sol/xhigh`、Inquisitorは`gpt-6-astra/xhigh`を各名前付き定義に明記します。カスタム定義の値が優先され、その前の解決順は明示した起動値、agents既定値、親の値です。Sentinelを既定のLunaで起動しないよう、名前付き役または対応するモデル・推論の組合せを明示します。[公式の設定優先順位](https://learn.chatgpt.com/docs/agent-configuration/subagents)
+Rootの`xhigh`は依存関係の判断と複数担当の根拠の統合に、Inquisitorの`max`は重大リスクの発生条件と反証の検証に推論を配分するための運用上の選択です。各役は担当範囲と受け入れ条件に沿って作業し、必要な根拠がそろった時点で結果を返します。効果は[推論レベルの比較](model-selection-evaluation.md#推論レベルを比べる)で、品質・完了時間・使用量から評価します。
+
+`[agents]`の既定値は`default_subagent_model = "gpt-6-luna"`、`default_subagent_reasoning_effort = "max"`です。Scholar・Adventurer・Verifierは同じ組合せ、Sentinelは`gpt-6-sol/xhigh`、Inquisitorは`gpt-6-astra/max`を各名前付き定義に明記します。カスタム定義の値が優先され、その前の解決順は明示した起動値、agents既定値、親の値です。Sentinelを既定のLunaで起動しないよう、名前付き役または対応するモデル・推論の組合せを明示します。[公式の設定優先順位](https://learn.chatgpt.com/docs/agent-configuration/subagents)
 
 名前付き役割またはモデル・推論レベルを明示して起動し、Rootのモデルを意図せず継承させません。名前付き役を選べないホストでは、指定モデルと役割の指示を使えるか確認して制約を報告します。定義が存在することと、ホストがその定義を読み込んで実行した証拠は区別します。
 
