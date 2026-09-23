@@ -1,6 +1,6 @@
 # モデル選択評価
 
-この評価は、同じタスクの評価基準と検証を使い、実際のモデル構成ごとの結果をパイロット/ホールドアウトで記録します。既存v3記録ではAstra/highのRoot、Luna 5.6 / maxのワーカー、独立Astra / xhighレビュアーを使います。追加条件`mixed-luna-v1`は、RootのAstra推論レベルを許可リストから選び、Adventurer / Scholar / VerifierにGPT-6 Luna / max、SentinelにGPT-6 Sol / xhigh、InquisitorにAstra / xhighを割り当てます。どの条件も同じJSONLへ記録できますが、条件IDごとに独立して検証・集計します。
+この評価は、同じタスクの評価基準と検証を使い、実際のモデル構成ごとの結果をパイロット/ホールドアウトで記録します。既存v3記録ではAstra/highのRoot、Luna 5.6 / maxのワーカー、独立Astra / xhighレビュアーを使います。混合条件`mixed-luna-v1`と`mixed-luna-v2`では、RootのAstra推論レベルを許可リストから選び、Adventurer / Scholar / VerifierにGPT-6 Luna / max、SentinelにGPT-6 Sol / xhighを割り当てます。Inquisitorはv1がAstra / xhigh、v2がAstra / maxです。どの条件も同じJSONLへ記録できますが、条件IDごとに独立して検証・集計します。
 
 ## 既存v3で比較する二つのstrategy
 
@@ -13,11 +13,23 @@
 
 `model_selection_eval.yaml`の`profiles`は、`solo`（子枠1）、`current3`（役割追加前の旧構成、子上限3）、`split3`、`split4`、`split6`、`split8`、`flow3`を定義します。`solo`でも高リスクタスクには独立Astraレビューを記録するため、子枠は0ではありません。結果行の任意フィールド`profile`はこの値に、任意フィールド`run_id`は同じタスク・戦略を反復したときの一意な記録IDにします。旧記録のこれらのフィールドは欠測のまま受理し、集計では`profile: "unknown"`とします。`provenance.run_id`は従来どおり必須で、トップレベル`run_id`がない旧記録ではその値を記録IDとして使います。明示したプロファイルでは、すべての実行段階に`named_role`を付けます。`current3`で使える子役は`adventurer`、`scholar`、`inquisitor`（Rootは`guildmaster`または`root`）で、`verifier`と`sentinel`は`split*`と`flow3`で使います。
 
-`condition_id: "mixed-luna-v1"`は旧プロファイルと別に宣言した混合モデル条件です。各イベントに`named_role`が必須で、Root / GuildmasterはGPT-6 Astra、推論レベルは`low`、`medium`、`high`、`xhigh`、`max`、`ultra`から選びます。`high`以外を使う場合は`provenance.root_override`も`true`にします。Adventurer、Scholar、VerifierはGPT-6 Luna / max、SentinelはGPT-6 Sol / xhigh、InquisitorはGPT-6 Astra / xhighです。RootのモデルとInquisitorのモデル/推論レベル、各役の会計ロールは変更できません。条件IDはマニフェストに宣言された`mixed-luna-v1`だけを受理し、誤記や未宣言条件を拒否します。この条件に`profile`を併記できません。各`condition_id`・Root model/effortの組み合わせについて、分割内の全タスクを要求し、異なるRoot effortの部分行で互いのcoverageを満たすことはできません。
+`condition_id: "mixed-luna-v1"`と`condition_id: "mixed-luna-v2"`は旧プロファイルと別に宣言した混合モデル条件です。各イベントに`named_role`が必須で、Root / GuildmasterはGPT-6 Astra、推論レベルは`low`、`medium`、`high`、`xhigh`、`max`、`ultra`から選びます。評価器の基準値`high`と異なる推論レベルは`provenance.root_override = true`として記録します。Rootの通常運用では`xhigh`を推奨し、両条件で利用者が推論レベルを選べます。Adventurer、Scholar、VerifierはどちらもGPT-6 Luna / max、SentinelはGPT-6 Sol / xhighです。Inquisitorはv1がGPT-6 Astra / xhigh、v2がGPT-6 Astra / maxです。Rootのモデル、条件ごとのInquisitorのモデル/推論レベル、各役の会計ロールは変更できません。マニフェストはv1、v2の片方または両方を宣言でき、宣言された条件IDだけを受理します。旧マニフェストに`conditions`がなくても従来の結果は引き続き処理できますが、混合条件行は受理しません。この条件に`profile`を併記できません。各`condition_id`・Root model/effortの組み合わせについて、分割内の全タスクを要求し、異なるRoot effortの部分行で互いのcoverageを満たすことはできません。
 
-新条件のパイロットとホールドアウトを比較するときは、同じ役割と割当、Root effort、並列上限、設定/プロンプト/Skillのダイジェスト、受け入れ条件、ホスト、コンテキスト条件を使います。いずれかを変える場合は別の`condition_id`として記録し、来歴ダイジェストを残します。
+各比較構成のパイロットとホールドアウトでは、役割と割当、Root effort、並列上限、設定/プロンプト/Skillのダイジェスト、受け入れ条件、ホスト、コンテキスト条件をそろえます。Root effortの比較は同じ`condition_id`内の別model/effortグループとして記録します。それ以外の構成条件を変える場合は別の`condition_id`を定義し、来歴ダイジェストを残します。
 
-旧6プロファイルのマニフェストと、`profiles`を持たない旧形式も引き続き受理します。旧v3の戦略・プロファイルに記録済みのモデル割当は変更せず、過去の行を現在のテンプレートや混合条件から再解釈しません。`flow3`や`mixed-luna-v1`の結果を扱う場合は、その定義を持つマニフェストを使います。未宣言のプロファイルや条件IDは推測して補いません。
+旧6プロファイルのマニフェストと、`profiles`を持たない旧形式も引き続き受理します。旧v3の戦略・プロファイルに記録済みのモデル割当は変更せず、過去の行を現在のテンプレートや混合条件から再解釈しません。`flow3`や混合条件の結果を扱う場合は、その条件定義を持つマニフェストを使います。未宣言のプロファイルや条件IDは推測して補いません。
+
+### 推論レベルを比べる
+
+RootとInquisitorの変更の効果を分けて調べるため、推論レベル以外のタスク・役割数・並列上限・ホスト・受け入れ条件をそろえ、次の三構成を比較します。
+
+| 比較構成 | condition_id | Rootの推論 | Inquisitorの推論 |
+| --- | --- | --- | --- |
+| A：評価の基準 | `mixed-luna-v1` | `high` | `xhigh` |
+| B：Rootの推論を変更 | `mixed-luna-v1` | `xhigh` | `xhigh` |
+| C：今回の推奨構成 | `mixed-luna-v2` | `xhigh` | `max` |
+
+AとBでRootの変更、BとCでInquisitorの変更を評価します。Inquisitorを使うレビュー必須タスクを含め、重大な見落とし・指摘の妥当性・手戻りを確認し、全試行を含む完了時間と使用量を比較します。各構成の結果と根拠を残し、採用する推論レベルの判断に使います。
 
 ### 同じ人数で運用を比べる
 
@@ -37,7 +49,7 @@
 
 JSONLの1行が1つのタスク/評価構成結果です。既存の`task_id`、`strategy`、`split`、`accepted`、`task_input`、`acceptance_evidence`、`provenance`を保持し、`grade_refs`を追加します。`attempts`は1から連番で、各試行は評価基準の結果としての`accepted`、`wall_time_seconds`、`wall_time_source`、実行した`stages`を持ちます。`accepted=false`は、失敗した実行段階と`failure_evidence`を伴う実行エラー、または全実行段階が`completed`でも評価基準を満たさない品質失敗のどちらも記録できます。再試行前の品質失敗も分母から除かず、最終試行の結果は記録の`accepted`と一致させます。
 
-各実行段階は`sequence`、一意の`invocation_id`、`role`（`root` / `worker` / `review`）、有効な`model` / `reasoning_effort`、`status`、`failure_evidence`、`usage`、`elapsed_seconds`、再現可能な`evidence_refs`を持ちます。`named_role`は`guildmaster` / `root` / `scholar` / `adventurer` / `verifier` / `sentinel` / `inquisitor`のいずれかです。明示した旧プロファイルと`condition_id`では必須、旧形式では任意です。Verifier/Sentinelは会計上`worker`、Inquisitorは`review`です。役名を付けた場合は、その行の評価条件に対応するモデル・推論レベルと会計ロールの一致を検証します。旧条件ではVerifier/Sentinelも従来のLuna / max割当を維持し、`mixed-luna-v1`では条件宣言どおりGPT-6 LunaとGPT-6 Solへ分けます。`sequence`は記録された実行順を表します。Astra-onlyのワーカーは拒否されますが、Astra+Lunaのワーカー数は0以上です。タスクの`review_required`が`true`なら最終試行へレビューを含めます。並列実行や再試行の数をこのバリデーターが知らないため、実際の全呼び出しを記録する責任は実行担当/Rootに残ります。
+各実行段階は`sequence`、一意の`invocation_id`、`role`（`root` / `worker` / `review`）、有効な`model` / `reasoning_effort`、`status`、`failure_evidence`、`usage`、`elapsed_seconds`、再現可能な`evidence_refs`を持ちます。`named_role`は`guildmaster` / `root` / `scholar` / `adventurer` / `verifier` / `sentinel` / `inquisitor`のいずれかです。明示した旧プロファイルと`condition_id`では必須、旧形式では任意です。Verifier/Sentinelは会計上`worker`、Inquisitorは`review`です。役名を付けた場合は、その行の評価条件に対応するモデル・推論レベルと会計ロールの一致を検証します。旧条件ではVerifier/Sentinelも従来のLuna / max割当を維持し、混合条件では定義に従いGPT-6 LunaとGPT-6 Solへ分けます。`sequence`は記録された実行順を表します。Astra-onlyのワーカーは拒否されますが、Astra+Lunaのワーカー数は0以上です。タスクの`review_required`が`true`なら最終試行へレビューを含めます。並列実行や再試行の数をこのバリデーターが知らないため、実際の全呼び出しを記録する責任は実行担当/Rootに残ります。
 
 子ターンの実時間を測る場合だけ、イベントへ`start_time`と`end_time`をペアで記録します。値は非負の数値、またはタイムゾーン付きISO-8601です。片方だけの時刻、逆順の時刻は拒否します。両方を`null`にするか両方を欠測にした子ターンは受理しますが、他の子ターンだけ時刻があっても、その試行の`max_parallel_child_turns`は`unknown`として集計し、失敗や使用量の分母から行を外しません。集計の`max_parallel_child_turns`は区間の重なりから算出したworker/reviewターンの最大数であり、設定枠の「開いたthread数」ではありません。設定枠を観測できた場合は試行へ`max_open_threads`と`max_open_threads_source`を記録し、別の集計値として出します。既知の時間区間から求めたピークが測定した`max_open_threads`より大きい場合は記録を拒否します。プロファイル上限超過も拒否します。旧記録や不完全な新記録の集計値は`unknown`で、0へ変換しません。
 
@@ -79,4 +91,4 @@ python3 scripts/model_selection_eval.py --summarize /path/to/results.jsonl
 
 あるタスクの一試行でも時間が欠測なら、そのタスクを`unknown_count`に数えます。グループに不明なタスクがあれば、観測できたタスクだけで代表値を出さず、中央値・p90・最大値と`basis`を不明にします。既知の0秒は欠測と区別します。`basis`は`observed`、`manual`、`synthetic`、または`unknown`です。旧記録は新しい計測を補完せず受理し、既存の集計項目を維持します。手入力の時間分布は`manual`として記述的に集計し、観測値だけを合計する従来の`total_wall_time_seconds`とは出典の扱いを区別します。
 
-`scripts/validation/fixtures/model_eval_offline.jsonl`は`synthetic`と明記した従来のパイロットフィクスチャです。直接実装・レビューなし、状況に応じた委譲でワーカーなし、重大なリスクのレビュー、複数ワーカー、再試行前の品質失敗、最終品質失敗、誤った役割・モデル・実行順、呼び出しの重複、失敗の証拠の欠落、Root推論レベル上書き、実行を観測した記録の来歴のバリデーター経路を確認します。`model_eval_mixed_condition.jsonl`は新条件専用の合成フィクスチャで、3役のGPT-6 LunaとGPT-6 Sol Sentinelの記録・割当・集計を検証します。どちらも実際のベンチマークではなく、品質、ホスト割り当て上限、API費用、費用削減の証拠ではありません。
+`scripts/validation/fixtures/model_eval_offline.jsonl`は`synthetic`と明記した従来のパイロットフィクスチャです。直接実装・レビューなし、状況に応じた委譲でワーカーなし、重大なリスクのレビュー、複数ワーカー、再試行前の品質失敗、最終品質失敗、誤った役割・モデル・実行順、呼び出しの重複、失敗の証拠の欠落、Root推論レベル上書き、実行を観測した記録の来歴のバリデーター経路を確認します。`model_eval_mixed_condition.jsonl`と`model_eval_mixed_v2_condition.jsonl`はそれぞれv1/v2の合成フィクスチャで、3役のGPT-6 Luna、GPT-6 Sol Sentinel、条件別Inquisitorの記録・割当・集計を検証します。どちらも実際のベンチマークではなく、品質、ホスト割り当て上限、API費用、費用削減の証拠ではありません。

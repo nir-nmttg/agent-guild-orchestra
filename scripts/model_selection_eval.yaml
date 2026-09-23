@@ -33,6 +33,18 @@
         "sentinel": {"role": "worker", "model": "gpt-6-sol", "reasoning_efforts": ["xhigh"]},
         "inquisitor": {"role": "review", "model": "gpt-6-astra", "reasoning_efforts": ["xhigh"]}
       }
+    },
+    "mixed-luna-v2": {
+      "strategy": "astra_luna",
+      "named_roles": {
+        "guildmaster": {"role": "root", "model": "gpt-6-astra", "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        "root": {"role": "root", "model": "gpt-6-astra", "reasoning_efforts": ["low", "medium", "high", "xhigh", "max", "ultra"]},
+        "adventurer": {"role": "worker", "model": "gpt-6-luna", "reasoning_efforts": ["max"]},
+        "scholar": {"role": "worker", "model": "gpt-6-luna", "reasoning_efforts": ["max"]},
+        "verifier": {"role": "worker", "model": "gpt-6-luna", "reasoning_efforts": ["max"]},
+        "sentinel": {"role": "worker", "model": "gpt-6-sol", "reasoning_efforts": ["xhigh"]},
+        "inquisitor": {"role": "review", "model": "gpt-6-astra", "reasoning_efforts": ["max"]}
+      }
     }
   },
   "tasks": [

@@ -23,7 +23,7 @@ AGENTS = {
     "scholar": ("gpt-6-luna", "max", "read-only"),
     "verifier": ("gpt-6-luna", "max", "workspace-write"),
     "sentinel": ("gpt-6-sol", "xhigh", "read-only"),
-    "inquisitor": ("gpt-6-astra", "xhigh", "read-only"),
+    "inquisitor": ("gpt-6-astra", "max", "read-only"),
 }
 
 

@@ -29,6 +29,10 @@ def validate_model_selection_eval() -> None:
     manifest = json.loads(plan.stdout)
     require(set(manifest["strategies"]) == {"astra_only", "astra_luna"}, "benchmark strategy matrix mismatch")
     require(
+        set(manifest["conditions"]) == {"mixed-luna-v1", "mixed-luna-v2"},
+        "current manifest must declare both mixed Luna conditions",
+    )
+    require(
         set(manifest["profiles"]) == {"solo", "current3", "split3", "flow3", "split4", "split6", "split8"},
         "parallel execution profiles are not explicit",
     )
@@ -85,8 +89,27 @@ def validate_model_selection_eval() -> None:
         "three GPT-6 Luna roles and the GPT-6 Sol Sentinel were not counted",
     )
 
+    mixed_v2_fixture = ROOT / "scripts/validation/fixtures/model_eval_mixed_v2_condition.jsonl"
+    mixed_v2_valid = run("--validate-results", str(mixed_v2_fixture))
+    require(mixed_v2_valid.returncode == 0, mixed_v2_valid.stderr)
+    mixed_v2_summary = run("--summarize", str(mixed_v2_fixture))
+    require(mixed_v2_summary.returncode == 0, mixed_v2_summary.stderr)
+    mixed_v2_value = json.loads(mixed_v2_summary.stdout)
+    require(len(mixed_v2_value["groups"]) == 1, "mixed v2 rows were split or merged unexpectedly")
+    mixed_v2_group = mixed_v2_value["groups"][0]
+    require(
+        mixed_v2_group["condition_id"] == "mixed-luna-v2"
+        and mixed_v2_group["root_model"] == "gpt-6-astra"
+        and mixed_v2_group["root_reasoning_effort"] == "high"
+        and mixed_v2_group["assigned_tasks"] == 2
+        and mixed_v2_group["review_events"] == 1
+        and mixed_v2_group["named_role_events"]["inquisitor"] == 1,
+        "mixed v2 identity, default Root effort, or review accounting was lost",
+    )
+
     rows = [json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines() if line]
     mixed_rows = [json.loads(line) for line in mixed_fixture.read_text(encoding="utf-8").splitlines() if line]
+    mixed_v2_rows = [json.loads(line) for line in mixed_v2_fixture.read_text(encoding="utf-8").splitlines() if line]
     with tempfile.TemporaryDirectory(prefix="agent-guild-model-eval-") as directory:
         malformed = Path(directory) / "invalid.jsonl"
 
@@ -104,6 +127,66 @@ def validate_model_selection_eval() -> None:
             == ["mixed-luna-v1"],
             "independent condition IDs were merged in summary output",
         )
+
+        both_conditions = json.loads(json.dumps(mixed_rows + mixed_v2_rows))
+        write_rows(malformed, both_conditions)
+        both_valid = run("--validate-results", str(malformed))
+        require(both_valid.returncode == 0, both_valid.stderr)
+        both_summary = run("--summarize", str(malformed))
+        require(both_summary.returncode == 0, both_summary.stderr)
+        both_groups = json.loads(both_summary.stdout)["groups"]
+        require(
+            [(group["condition_id"], group["root_reasoning_effort"]) for group in both_groups]
+            == [("mixed-luna-v1", "high"), ("mixed-luna-v2", "high")],
+            "v1/v2 records or their Root effort coverage were combined",
+        )
+
+        v2_xhigh_rows = json.loads(json.dumps(mixed_v2_rows))
+        for row in v2_xhigh_rows:
+            row["evidence_kind"] = "manual_record"
+            row["provenance"]["root_override"] = True
+            row["provenance"]["run_id"] += "-xhigh"
+            for attempt in row["attempts"]:
+                attempt["wall_time_source"] = "manual"
+                for event in attempt["stages"]:
+                    event["invocation_id"] += "-xhigh"
+                    event["usage"]["usage_source"] = "manual"
+                    event["usage"]["api_cost_source"] = "unknown"
+                    if event["role"] == "root":
+                        event["reasoning_effort"] = "xhigh"
+        write_rows(malformed, v2_xhigh_rows)
+        v2_xhigh_valid = run("--validate-results", str(malformed))
+        require(v2_xhigh_valid.returncode == 0, v2_xhigh_valid.stderr)
+        v2_xhigh_summary = run("--summarize", str(malformed))
+        require(v2_xhigh_summary.returncode == 0, v2_xhigh_summary.stderr)
+        v2_xhigh_group = json.loads(v2_xhigh_summary.stdout)["groups"][0]
+        require(
+            v2_xhigh_group["condition_id"] == "mixed-luna-v2"
+            and v2_xhigh_group["root_model"] == "gpt-6-astra"
+            and v2_xhigh_group["root_reasoning_effort"] == "xhigh"
+            and v2_xhigh_group["evidence_kind"] == "manual_record",
+            "v2 Root xhigh override was not accepted and grouped independently",
+        )
+
+        for condition_rows, field, invalid_value, message in (
+            (mixed_rows, "reasoning_effort", "max", "reasoning_effort must be one of ['xhigh']"),
+            (mixed_v2_rows, "reasoning_effort", "xhigh", "reasoning_effort must be one of ['max']"),
+            (mixed_v2_rows, "role", "worker", "accounting role must be review"),
+        ):
+            invalid_condition = json.loads(json.dumps(condition_rows))
+            target = next(
+                event
+                for attempt in invalid_condition[0]["attempts"]
+                for event in attempt["stages"]
+                if event.get("named_role") == "inquisitor"
+            )
+            target[field] = invalid_value
+            write_rows(malformed, invalid_condition)
+            rejected = run("--validate-results", str(malformed))
+            require(
+                rejected.returncode == 2 and message in rejected.stderr,
+                f"invalid {condition_rows[0]['condition_id']} Inquisitor {field} was accepted",
+            )
 
         manual_high_effort_rows = json.loads(json.dumps(mixed_rows))
         for row in manual_high_effort_rows:
@@ -210,6 +293,24 @@ def validate_model_selection_eval() -> None:
             str(mixed_fixture),
         )
         require(rejected.returncode == 2 and "condition_id is undeclared" in rejected.stderr, "legacy manifest accepted a condition it does not declare")
+
+        v1_only_manifest = json.loads(json.dumps(manifest))
+        v1_only_manifest["conditions"] = {"mixed-luna-v1": manifest["conditions"]["mixed-luna-v1"]}
+        v1_only_manifest_path = Path(directory) / "v1-only-manifest.yaml"
+        v1_only_manifest_path.write_text(json.dumps(v1_only_manifest, ensure_ascii=False), encoding="utf-8")
+        v1_only_valid = run("--manifest", str(v1_only_manifest_path), "--validate-results", str(mixed_fixture))
+        require(v1_only_valid.returncode == 0, v1_only_valid.stderr)
+        rejected = run("--manifest", str(v1_only_manifest_path), "--validate-results", str(mixed_v2_fixture))
+        require(rejected.returncode == 2 and "condition_id is undeclared" in rejected.stderr, "v1-only manifest accepted v2 rows")
+
+        v2_only_manifest = json.loads(json.dumps(manifest))
+        v2_only_manifest["conditions"] = {"mixed-luna-v2": manifest["conditions"]["mixed-luna-v2"]}
+        v2_only_manifest_path = Path(directory) / "v2-only-manifest.yaml"
+        v2_only_manifest_path.write_text(json.dumps(v2_only_manifest, ensure_ascii=False), encoding="utf-8")
+        v2_only_valid = run("--manifest", str(v2_only_manifest_path), "--validate-results", str(mixed_v2_fixture))
+        require(v2_only_valid.returncode == 0, v2_only_valid.stderr)
+        rejected = run("--manifest", str(v2_only_manifest_path), "--validate-results", str(mixed_fixture))
+        require(rejected.returncode == 2 and "condition_id is undeclared" in rejected.stderr, "v2-only manifest accepted v1 rows")
 
         retry_same_condition = json.loads(json.dumps(mixed_rows))
         duplicate_condition_row = json.loads(json.dumps(retry_same_condition[0]))

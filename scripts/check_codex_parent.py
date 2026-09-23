@@ -30,7 +30,7 @@ EXPECTED = {
     "scholar": {"model": "gpt-6-luna", "effort": "max", "sandbox": "read-only"},
     "verifier": {"model": "gpt-6-luna", "effort": "max", "sandbox": "workspace-write"},
     "sentinel": {"model": "gpt-6-sol", "effort": "xhigh", "sandbox": "read-only"},
-    "inquisitor": {"model": "gpt-6-astra", "effort": "xhigh", "sandbox": "read-only"},
+    "inquisitor": {"model": "gpt-6-astra", "effort": "max", "sandbox": "read-only"},
 }
 ROLE_NAMES = tuple(EXPECTED)
 EXPECTED_MAX_THREADS = 8

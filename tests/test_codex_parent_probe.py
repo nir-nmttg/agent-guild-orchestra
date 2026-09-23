@@ -167,6 +167,8 @@ class ProbeHelpersTests(unittest.TestCase):
         self.assertEqual(sentinel["declaration"], {"model": "gpt-6-sol", "effort": "xhigh", "sandbox": "read-only"})
         self.assertEqual(sentinel["observation"]["spawnEventCount"], 1)
         self.assertEqual(sentinel["observation"]["childMetadataMatches"], 1)
+        inquisitor = native["evidence"]["expected"]["inquisitor"]
+        self.assertEqual(inquisitor["declaration"], {"model": "gpt-6-astra", "effort": "max", "sandbox": "read-only"})
         self.assertEqual(permission["status"], "unknown")
 
         options = probe.parse_args(["--live", "--role", "scholar", "--role", "sentinel"])
@@ -186,6 +188,13 @@ class ProbeHelpersTests(unittest.TestCase):
         native, _ = probe.live_probe(rpc, "parent", Path("parent"), Path("child"), 1)
         self.assertEqual(native["status"], "failed")
         self.assertEqual(native["evidence"]["expected"]["scholar"]["status"], "failed")
+
+        # A parent still using xhigh must not hide a stale child definition.
+        rpc = FakeRpc(("inquisitor",))
+        rpc.metadata_overrides["inquisitor"] = {"reasoningEffort": "xhigh"}
+        native, _ = probe.live_probe(rpc, "parent", Path("parent"), Path("child"), 1, ("inquisitor",))
+        self.assertEqual(native["status"], "failed")
+        self.assertEqual(native["evidence"]["expected"]["inquisitor"]["status"], "failed")
 
     def test_sentinel_live_observation_requires_its_name_model_and_effort(self) -> None:
         class FakeRpc:
