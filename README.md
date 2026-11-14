@@ -1,3 +1,6 @@
+> [!WARNING]
+> 作者は [agent-skills](https://github.com/nir-nmttg/agent-skills) に移行したため、このリポジトリ（agent-guild-orchestra）の開発は終了しました。
+
 <img src="docs/assets/agent-guild-orchestra-social-preview.png" alt="Agent Guild Orchestra">
 
 # Agent Guild Orchestra
